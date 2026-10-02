@@ -269,14 +269,6 @@ function render(d) {
   renderRanking();
 }
 
-$$(".period").forEach(b => {
-  b.addEventListener("click", () => {
-    $$(".period").forEach(x => x.classList.remove("active"));
-    b.classList.add("active");
-    period = b.dataset.period;
-    renderRanking();
-  });
-});
 $$(".tab").forEach(b => {
   b.addEventListener("click", () => {
 
