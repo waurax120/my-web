@@ -1,6 +1,7 @@
 let DATA = null;
 let pieChart = null;
 let minuteChart = null;
+let rankType = "comments";
 let period = "all";
 
 const $ = s => document.querySelector(s);
