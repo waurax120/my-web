@@ -1,14 +1,21 @@
 let DATA = null;
 let pieChart = null;
 let minuteChart = null;
+
 let rankType = "comments";
 let period = "今日";
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 
+/* =========================
+   画面切り替え
+========================= */
+
 function show(id) {
-  $$(".screen").forEach(x => x.classList.remove("active"));
+  $$(".screen").forEach(x => {
+    x.classList.remove("active");
+  });
 
   const target = $("#" + id);
 
@@ -19,13 +26,34 @@ function show(id) {
   window.scrollTo(0, 0);
 }
 
-/* =========================
-   画面切り替え
-========================= */
-
 $$("[data-screen]").forEach(button => {
   button.addEventListener("click", () => {
     show(button.dataset.screen);
+  });
+});
+
+/* =========================
+   期間ボタン
+========================= */
+
+$$(".filter").forEach(button => {
+  button.addEventListener("click", () => {
+
+    $$(".filter").forEach(x => {
+      x.classList.remove("active");
+    });
+
+    button.classList.add("active");
+
+    period = button.textContent.trim();
+
+    /*
+     * すでに分析結果がある場合は
+     * その場でもう一度取得
+     */
+    if (DATA) {
+      analyze();
+    }
   });
 });
 
@@ -49,8 +77,14 @@ if (channelInput) {
   });
 }
 
+/* =========================
+   分析
+========================= */
+
 async function analyze() {
-  const q = $("#channelInput").value.trim();
+
+  const q =
+    $("#channelInput").value.trim();
 
   if (!q) {
     $("#error").textContent =
@@ -59,18 +93,31 @@ async function analyze() {
   }
 
   $("#error").textContent =
-    "分析中… YouTubeからデータを取得しています。";
+    `分析中… ${period}のデータを取得しています。`;
+
+  /*
+   * ★ここが重要
+   *
+   * periodをサーバーへ送信
+   */
+  const url =
+    "/api/analyze?q=" +
+    encodeURIComponent(q) +
+    "&period=" +
+    encodeURIComponent(period);
 
   try {
-    const r = await fetch(
-      "/api/analyze?q=" + encodeURIComponent(q)
-    );
 
-    const d = await r.json();
+    const r =
+      await fetch(url);
+
+    const d =
+      await r.json();
 
     if (!r.ok) {
       throw new Error(
-        d.error || "取得に失敗しました"
+        d.error ||
+        "取得に失敗しました"
       );
     }
 
@@ -83,6 +130,7 @@ async function analyze() {
     show("analysis");
 
   } catch (e) {
+
     $("#error").textContent =
       e.message ||
       "エラーが発生しました。";
@@ -95,53 +143,84 @@ async function analyze() {
 
 function render(d) {
 
-  const channel = d.channel || {};
-  const analysis = d.analysis || {};
+  const channel =
+    d.channel || {};
 
-  $("#channelCard").innerHTML = `
-    <img
-      src="${esc(channel.thumbnail || "")}"
-      alt=""
-    >
+  const analysis =
+    d.analysis || {};
 
-    <div>
-      <h2>
-        ${esc(channel.title || "")}
-      </h2>
+  /* チャンネル */
 
-      <div class="sub">
+  if ($("#channelCard")) {
+
+    $("#channelCard").innerHTML = `
+      <img
+        src="${esc(
+          channel.thumbnail || ""
+        )}"
+        alt=""
+      >
+
+      <div>
+
+        <h2>
+          ${esc(
+            channel.title || ""
+          )}
+        </h2>
+
+        <div class="sub">
+
+          ${
+            d.live
+              ? "🔴 LIVE中"
+              : "⚪ 現在LIVEなし"
+          }
+
+         　
+
+          ${esc(
+            d.period || period
+          )}
+
+         　
+
+          取得コメント
+          ${Number(
+            d.totalComments || 0
+          ).toLocaleString()}件
+
+        </div>
+
         ${
           d.live
-            ? "🔴 LIVE中"
-            : "⚪ 現在LIVEなし"
+            ? `
+              <a
+                href="${esc(
+                  d.live.url || ""
+                )}"
+                target="_blank"
+                rel="noopener"
+                style="color:#79a0ff"
+              >
+                YouTubeでLIVEを見る ↗
+              </a>
+            `
+            : ""
         }
 
-       　
-        取得コメント
-        ${Number(d.totalComments || 0).toLocaleString()}件
       </div>
+    `;
+  }
 
-      ${
-        d.live
-          ? `
-            <a
-              href="${esc(d.live.url || "")}"
-              target="_blank"
-              rel="noopener"
-              style="color:#79a0ff"
-            >
-              YouTubeでLIVEを見る ↗
-            </a>
-          `
-          : ""
-      }
-    </div>
-  `;
-
-  /* チャット稼ぎ度 */
+  /* =========================
+     チャット稼ぎ度
+  ========================= */
 
   const score =
-    Number(analysis.score || 0);
+    Number(
+      analysis.score || 0
+    );
 
   const consecutiveRate =
     Number(
@@ -154,6 +233,7 @@ function render(d) {
   }
 
   if ($("#scoreText")) {
+
     $("#scoreText").textContent =
       score >= 70
         ? "連投傾向が高め"
@@ -163,17 +243,22 @@ function render(d) {
   }
 
   if ($("#rateText")) {
+
     $("#rateText").innerHTML = `
       普通のチャット
-      <b>${Math.max(
-        0,
-        100 - consecutiveRate
-      )}%</b>
+      <b>
+        ${Math.max(
+          0,
+          100 - consecutiveRate
+        )}%
+      </b>
 
      　
 
       連投チャット
-      <b>${consecutiveRate}%</b>
+      <b>
+        ${consecutiveRate}%
+      </b>
     `;
   }
 
@@ -187,56 +272,59 @@ function render(d) {
       pieChart.destroy();
     }
 
-    pieChart = new Chart(
-      $("#pie"),
-      {
-        type: "doughnut",
+    pieChart =
+      new Chart(
+        $("#pie"),
+        {
+          type: "doughnut",
 
-        data: {
-          labels: [
-            "普通のチャット",
-            "連投チャット"
-          ],
+          data: {
 
-          datasets: [
-            {
-              data: [
-                Number(
-                  analysis.normalCount || 0
-                ),
+            labels: [
+              "普通のチャット",
+              "連投チャット"
+            ],
 
-                Number(
-                  analysis.consecutiveCount || 0
-                )
-              ]
-            }
-          ]
-        },
+            datasets: [
+              {
+                data: [
+                  Number(
+                    analysis.normalCount ||
+                    0
+                  ),
 
-        options: {
-          plugins: {
-            legend: {
-              labels: {
-                color: "#fff"
+                  Number(
+                    analysis.consecutiveCount ||
+                    0
+                  )
+                ]
               }
+            ]
+          },
+
+          options: {
+
+            plugins: {
+
+              legend: {
+                labels: {
+                  color: "#fff"
+                }
+              }
+
             }
+
           }
         }
-      }
-    );
+      );
   }
 
   /* =========================
-     コメント/分グラフ
+     コメント/分
   ========================= */
 
-  if ($("#minuteChart")) {
-
-    if (minuteChart) {
-      minuteChart.destroy();
-    }
-
-    const minute = d.minute || {
+  const minute =
+    d.minute || {
       labels: [],
       values: [],
       average: 0,
@@ -244,145 +332,196 @@ function render(d) {
       peakIndex: -1
     };
 
-    minuteChart = new Chart(
-      $("#minuteChart"),
-      {
-        type: "line",
+  if ($("#minuteChart")) {
 
-        data: {
-          labels:
-            minute.labels || [],
+    if (minuteChart) {
+      minuteChart.destroy();
+    }
 
-          datasets: [
-            {
-              label: "コメント/分",
+    minuteChart =
+      new Chart(
+        $("#minuteChart"),
+        {
+          type: "line",
 
-              data:
-                minute.values || [],
+          data: {
 
-              tension: 0.25,
+            labels:
+              minute.labels || [],
 
-              fill: false
-            }
-          ]
-        },
+            datasets: [
+              {
+                label:
+                  "コメント/分",
 
-        options: {
-          scales: {
+                data:
+                  minute.values || [],
 
-            x: {
-              ticks: {
-                color: "#9aa4b5"
+                tension: 0.25,
+
+                fill: false
+              }
+            ]
+          },
+
+          options: {
+
+            scales: {
+
+              x: {
+                ticks: {
+                  color: "#9aa4b5"
+                }
+              },
+
+              y: {
+
+                beginAtZero: true,
+
+                ticks: {
+                  color: "#9aa4b5"
+                }
               }
             },
 
-            y: {
-              beginAtZero: true,
+            plugins: {
 
-              ticks: {
-                color: "#9aa4b5"
-              }
-            }
-          },
-
-          plugins: {
-            legend: {
-              labels: {
-                color: "#fff"
+              legend: {
+                labels: {
+                  color: "#fff"
+                }
               }
             }
           }
         }
-      }
+      );
+  }
+
+  if ($("#minuteStats")) {
+
+    $("#minuteStats").innerHTML = `
+      平均
+      <b>
+        ${Number(
+          minute.average || 0
+        )}
+      </b>
+      コメント/分
+
+      ・
+
+      最大
+      <b>
+        ${Number(
+          minute.peak || 0
+        )}
+      </b>
+      コメント/分
+    `;
+  }
+
+  /* =========================
+     ピーク時間
+  ========================= */
+
+  const peakIndex =
+    Number(
+      minute.peakIndex
     );
 
-    if ($("#minuteStats")) {
-      $("#minuteStats").innerHTML = `
-        平均
-        <b>${Number(
-          minute.average || 0
-        )}</b>
-        コメント/分
+  if (
+    $("#peak") &&
+    peakIndex >= 0 &&
+    minute.labels &&
+    minute.labels[
+      peakIndex
+    ] !== undefined
+  ) {
 
-        ・
+    $("#peak").innerHTML = `
+      <b>
+        ${esc(
+          minute.labels[
+            peakIndex
+          ]
+        )}
+      </b>
 
-        最大
-        <b>${Number(
+      に
+
+      <b>
+        ${Number(
           minute.peak || 0
-        )}</b>
-        コメント/分
-      `;
-    }
+        )}
+      </b>
 
-    const pi =
-      Number(minute.peakIndex);
+      コメント/分でした。
+    `;
 
-    if (
-      $("#peak") &&
-      pi >= 0 &&
-      minute.labels &&
-      minute.labels[pi] !== undefined
-    ) {
+  } else if ($("#peak")) {
 
-      $("#peak").innerHTML = `
-        <b>
-          ${esc(minute.labels[pi])}
-        </b>
-        に
-        <b>
-          ${Number(minute.peak || 0)}
-        </b>
-        コメント/分でした。
-      `;
+    $("#peak").textContent =
+      "データがありません。";
+  }
 
-    } else if ($("#peak")) {
+  /* =========================
+     急増検出
+  ========================= */
 
-      $("#peak").textContent =
-        "データがありません。";
-    }
+  if ($("#spikes")) {
 
-    /* 急増 */
+    const values =
+      minute.values || [];
 
-    if ($("#spikes")) {
+    const average =
+      Number(
+        minute.average || 0
+      );
 
-      const vals =
-        minute.values || [];
+    const spikes =
+      values
+        .map((value, index) => ({
+          value:
+            Number(value),
+          index
+        }))
+        .filter(item =>
+          average &&
+          item.value >=
+            average * 2
+        )
+        .slice(-5);
 
-      const avg =
-        Number(minute.average || 0);
-
-      const spikes =
-        vals
-          .map((v, i) => ({
-            v: Number(v),
-            i
-          }))
-          .filter(x =>
-            avg &&
-            x.v >= avg * 2
-          )
-          .slice(-5);
+    if (spikes.length) {
 
       $("#spikes").innerHTML =
-        spikes.length
-          ? spikes
-              .map(x => `
-                🚨
-                ${esc(
-                  minute.labels[x.i]
-                )}：
-                ${x.v}件
-                （平均の${(
-                  x.v / avg
-                ).toFixed(1)}倍）
-              `)
-              .join("<br>")
-          : "大きな急増は見つかりませんでした。";
+        spikes
+          .map(item => `
+            🚨
+            ${esc(
+              minute.labels[
+                item.index
+              ]
+            )}：
+
+            ${item.value}件
+
+            （平均の${(
+              item.value /
+              average
+            ).toFixed(1)}倍）
+          `)
+          .join("<br>");
+
+    } else {
+
+      $("#spikes").textContent =
+        "大きな急増は見つかりませんでした。";
     }
   }
 
   /* =========================
-     ユーザーランキング
+     ユーザー
   ========================= */
 
   renderUsers();
@@ -391,86 +530,71 @@ function render(d) {
 }
 
 /* =========================
-   ユーザー表示
+   ユーザー上位5人
 ========================= */
 
 function renderUsers() {
 
-  if (!DATA || !$("#userPreview")) {
+  if (
+    !DATA ||
+    !$("#userPreview")
+  ) {
     return;
   }
 
   const users =
-    DATA.analysis?.users || [];
+    DATA.analysis?.users ||
+    [];
 
   $("#userPreview").innerHTML =
     users
       .slice(0, 5)
-      .map((u, i) => `
-        <div class="rank">
+      .map(
+        (user, index) => `
 
-          <div class="num">
-            ${i + 1}
-          </div>
+          <div class="rank">
 
-          <div>
-
-            <b>
-              ${esc(u.name)}
-            </b>
-
-            <div class="sub">
-              連投最大
-              ${Number(
-                u.maxStreak || 0
-              )}
-
-              ・平均
-              ${Number(
-                u.averageLength || 0
-              )}文字
+            <div class="num">
+              ${index + 1}
             </div>
 
+            <div>
+
+              <b>
+                ${esc(
+                  user.name
+                )}
+              </b>
+
+              <div class="sub">
+
+                連投最大
+                ${Number(
+                  user.maxStreak || 0
+                )}
+
+                ・平均
+                ${Number(
+                  user.averageLength || 0
+                )}文字
+
+              </div>
+
+            </div>
+
+            <b>
+              ${Number(
+                user.count || 0
+              ).toLocaleString()}件
+            </b>
+
           </div>
-
-          <b>
-            ${Number(
-              u.count || 0
-            ).toLocaleString()}件
-          </b>
-
-        </div>
-      `)
+        `
+      )
       .join("")
       ||
       "データがありません。";
 }
-
-/* =========================
-   期間ボタン
-   今日 / 7日 / 30日 / 全期間
-========================= */
-
-$$(".filter").forEach(button => {
-
-  button.addEventListener(
-    "click",
-    () => {
-
-      $$(".filter").forEach(x => {
-        x.classList.remove("active");
-      });
-
-      button.classList.add("active");
-
-      period =
-        button.textContent.trim();
-
-      renderRanking();
-    }
-  );
-
-});
 
 /* =========================
    ランキングタブ
@@ -483,10 +607,14 @@ $$(".tab").forEach(button => {
     () => {
 
       $$(".tab").forEach(x => {
-        x.classList.remove("active");
+        x.classList.remove(
+          "active"
+        );
       });
 
-      button.classList.add("active");
+      button.classList.add(
+        "active"
+      );
 
       rankType =
         button.dataset.rank ||
@@ -511,11 +639,10 @@ if (rankSearch) {
     "input",
     renderRanking
   );
-
 }
 
 /* =========================
-   ランキング表示
+   ランキング
 ========================= */
 
 function renderRanking() {
@@ -525,40 +652,44 @@ function renderRanking() {
   }
 
   const users =
-    DATA.analysis?.users || [];
+    DATA.analysis?.users ||
+    [];
 
   let rows =
-    users.map(u => {
+    users.map(user => {
 
-      let metric;
+      let metric = 0;
 
-      if (rankType === "streak") {
+      if (
+        rankType ===
+        "streak"
+      ) {
 
         metric =
           Number(
-            u.maxStreak || 0
+            user.maxStreak || 0
           );
 
       } else {
 
         metric =
           Number(
-            u.count || 0
+            user.count || 0
           );
       }
 
       return {
-        ...u,
+        ...user,
         metric
       };
-
     });
 
   /* 大きい順 */
 
   rows.sort(
     (a, b) =>
-      b.metric - a.metric
+      b.metric -
+      a.metric
   );
 
   /* 検索 */
@@ -571,14 +702,14 @@ function renderRanking() {
       : "";
 
   rows =
-    rows.filter(u => {
+    rows.filter(user => {
 
       if (!search) {
         return true;
       }
 
       return String(
-        u.name || ""
+        user.name || ""
       )
         .toLowerCase()
         .includes(search);
@@ -591,50 +722,53 @@ function renderRanking() {
   $("#rankingList").innerHTML =
     rows
       .slice(0, 100)
-      .map((u, i) => `
+      .map(
+        (user, index) => `
 
-        <div class="rank">
+          <div class="rank">
 
-          <div class="num">
-            ${i + 1}
-          </div>
+            <div class="num">
+              ${index + 1}
+            </div>
 
-          <div>
+            <div>
 
-            <b>
-              ${esc(u.name)}
-            </b>
+              <b>
+                ${esc(
+                  user.name
+                )}
+              </b>
 
-            <div class="sub">
+              <div class="sub">
 
-              コメント
-              ${Number(
-                u.count || 0
-              ).toLocaleString()}
+                コメント
+                ${Number(
+                  user.count || 0
+                ).toLocaleString()}
 
-              ・連投最大
-              ${Number(
-                u.maxStreak || 0
-              )}
+                ・連投最大
+                ${Number(
+                  user.maxStreak || 0
+                )}
 
-              ・平均
-              ${Number(
-                u.averageLength || 0
-              )}文字
+                ・平均
+                ${Number(
+                  user.averageLength || 0
+                )}文字
+
+              </div>
 
             </div>
 
+            <b>
+              ${Number(
+                user.metric || 0
+              ).toLocaleString()}
+            </b>
+
           </div>
-
-          <b>
-            ${Number(
-              u.metric || 0
-            ).toLocaleString()}
-          </b>
-
-        </div>
-
-      `)
+        `
+      )
       .join("")
       ||
       "該当するユーザーがいません。";
@@ -644,20 +778,29 @@ function renderRanking() {
    HTMLエスケープ
 ========================= */
 
-function esc(s) {
+function esc(value) {
 
   return String(
-    s ?? ""
+    value ?? ""
   ).replace(
     /[&<>"']/g,
 
-    c => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[c])
+    character => ({
+      "&":
+        "&amp;",
+
+      "<":
+        "&lt;",
+
+      ">":
+        "&gt;",
+
+      '"':
+        "&quot;",
+
+      "'":
+        "&#39;"
+    }[character])
   );
 }
 
