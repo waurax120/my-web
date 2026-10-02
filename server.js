@@ -1,159 +1,668 @@
-require("dotenv").config();
-const express = require("express");
-const path = require("path");
+let DATA = null;
+let pieChart = null;
+let minuteChart = null;
+let rankType = "comments";
+let period = "今日";
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.YOUTUBE_API_KEY;
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+function show(id) {
+  $$(".screen").forEach(x => x.classList.remove("active"));
 
-async function yt(url) {
-  if (!API_KEY) throw new Error("YOUTUBE_API_KEY が設定されていません。");
-  const u = new URL(url);
-  u.searchParams.set("key", API_KEY);
-  const r = await fetch(u);
-  const data = await r.json();
-  if (!r.ok) throw new Error(data?.error?.message || "YouTube API error");
-  return data;
-}
+  const target = $("#" + id);
 
-function pct(n, d) { return d ? Math.round(n / d * 100) : 0; }
-
-function buildMinuteStats(messages) {
-  const map = new Map();
-  for (const m of messages) {
-    const t = new Date(m.snippet?.publishedAt || 0);
-    if (!t.getTime()) continue;
-    const key = new Date(Math.floor(t.getTime() / 60000) * 60000).toISOString();
-    map.set(key, (map.get(key) || 0) + 1);
-  }
-  const rows = [...map.entries()].sort((a,b) => a[0].localeCompare(b[0]));
-  const counts = rows.map(x => x[1]);
-  return {
-    labels: rows.map(x => new Date(x[0]).toLocaleTimeString("ja-JP", {hour:"2-digit", minute:"2-digit"})),
-    values: counts,
-    average: counts.length ? Math.round(counts.reduce((a,b)=>a+b,0) / counts.length * 10) / 10 : 0,
-    peak: counts.length ? Math.max(...counts) : 0,
-    peakIndex: counts.length ? counts.indexOf(Math.max(...counts)) : -1
-  };
-}
-
-function analyzeMessages(messages) {
-  const users = new Map();
-  let consecutive = 0;
-  const sorted = [...messages].sort((a,b) =>
-    new Date(a.snippet?.publishedAt || 0) - new Date(b.snippet?.publishedAt || 0)
-  );
-
-  for (let i=0; i<sorted.length; i++) {
-    const m = sorted[i];
-    const s = m.snippet || {};
-    const author = s.authorChannelId || m.authorDetails?.channelId || m.authorDetails?.displayName || "unknown";
-    const name = m.authorDetails?.displayName || author;
-    const text = s.displayMessage || "";
-    const item = users.get(author) || {id: author, name, count:0, maxStreak:1, streak:1, totalLength:0};
-    item.count++;
-    item.totalLength += text.length;
-    if (i > 0) {
-      const prev = sorted[i-1];
-      const prevId = prev.snippet?.authorChannelId || prev.authorDetails?.channelId || prev.authorDetails?.displayName;
-      const gap = new Date(s.publishedAt).getTime() - new Date(prev.snippet?.publishedAt || 0).getTime();
-      if (prevId === author && gap >= 0 && gap <= 10000) {
-        consecutive++;
-        item.streak++;
-        item.maxStreak = Math.max(item.maxStreak, item.streak);
-      } else item.streak = 1;
-    }
-    users.set(author, item);
+  if (target) {
+    target.classList.add("active");
   }
 
-  const total = messages.length;
-  const consecutiveRate = pct(consecutive, total);
-  const score = Math.min(100, Math.round(consecutiveRate * 0.7 + Math.min(30, (total / 1000) * 30)));
-
-  return {
-    users: [...users.values()]
-      .map(u => ({...u, averageLength: u.count ? Math.round(u.totalLength/u.count*10)/10 : 0}))
-      .sort((a,b)=>b.count-a.count),
-    consecutiveCount: consecutive,
-    normalCount: Math.max(0, total - consecutive),
-    consecutiveRate,
-    score
-  };
+  window.scrollTo(0, 0);
 }
 
-app.get("/api/analyze", async (req, res) => {
-  try {
-    const q = String(req.query.q || "").trim();
-    if (!q) return res.status(400).json({error:"チャンネル名を入力してください。"});
+/* =========================
+   画面切り替え
+========================= */
 
-    const channelSearch = await yt(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(q)}`
-    );
-    const channel = channelSearch.items?.[0];
-    if (!channel) return res.status(404).json({error:"チャンネルが見つかりませんでした。"});
-
-    const channelId = channel.id.channelId;
-    const videosData = await yt(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&order=date&type=video&maxResults=20`
-    );
-    const ids = videosData.items.map(x => x.id.videoId).filter(Boolean);
-
-    let videos = [];
-    let allComments = [];
-    let liveMessages = [];
-    if (ids.length) {
-      const vd = await yt(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,liveStreamingDetails&id=${ids.join(",")}`);
-      videos = vd.items || [];
-
-      for (const v of videos.slice(0, 10)) {
-        try {
-          const cd = await yt(`https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=${v.id}&maxResults=100&order=relevance`);
-          for (const item of (cd.items || [])) {
-            const s = item.snippet?.topLevelComment?.snippet;
-            if (s) allComments.push({
-              id:item.id, snippet:{...s, displayMessage:s.textDisplay, publishedAt:s.publishedAt},
-              authorDetails:{displayName:s.authorDisplayName, channelId:s.authorChannelId}
-            });
-          }
-        } catch (_) {}
-        if (v.liveStreamingDetails?.activeLiveChatId) {
-          try {
-            const lc = await yt(`https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet,authorDetails&liveChatId=${v.liveStreamingDetails.activeLiveChatId}&maxResults=200`);
-            liveMessages.push(...(lc.items || []));
-          } catch (_) {}
-        }
-      }
-    }
-
-    const source = liveMessages.length ? liveMessages : allComments;
-    const analysis = analyzeMessages(source);
-    const minute = buildMinuteStats(source);
-    const currentLive = videos.find(v => v.liveStreamingDetails?.activeLiveChatId);
-
-    res.json({
-      channel:{id:channelId, title:channel.snippet.title, thumbnail:channel.snippet.thumbnails?.high?.url || channel.snippet.thumbnails?.default?.url},
-      videos: videos.map(v => ({
-        id:v.id, title:v.snippet?.title, publishedAt:v.snippet?.publishedAt,
-        thumbnail:v.snippet?.thumbnails?.high?.url || v.snippet?.thumbnails?.medium?.url,
-        views:Number(v.statistics?.viewCount||0), likes:Number(v.statistics?.likeCount||0),
-        comments:Number(v.statistics?.commentCount||0),
-        live:!!v.liveStreamingDetails?.activeLiveChatId,
-        url:`https://www.youtube.com/watch?v=${v.id}`
-      })),
-      live: currentLive ? {
-        id:currentLive.id, title:currentLive.snippet?.title,
-        url:`https://www.youtube.com/watch?v=${currentLive.id}`
-      } : null,
-      totalComments: source.length,
-      analysis,
-      minute
-    });
-  } catch (e) {
-    res.status(500).json({error:e.message});
-  }
+$$("[data-screen]").forEach(button => {
+  button.addEventListener("click", () => {
+    show(button.dataset.screen);
+  });
 });
 
-app.listen(PORT, () => console.log(`Chat Kasegi Checker: http://localhost:${PORT}`));
+/* =========================
+   分析ボタン
+========================= */
+
+const analyzeBtn = $("#analyzeBtn");
+
+if (analyzeBtn) {
+  analyzeBtn.addEventListener("click", analyze);
+}
+
+const channelInput = $("#channelInput");
+
+if (channelInput) {
+  channelInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      analyze();
+    }
+  });
+}
+
+async function analyze() {
+  const q = $("#channelInput").value.trim();
+
+  if (!q) {
+    $("#error").textContent =
+      "チャンネル名を入力してください。";
+    return;
+  }
+
+  $("#error").textContent =
+    "分析中… YouTubeからデータを取得しています。";
+
+  try {
+    const r = await fetch(
+      "/api/analyze?q=" + encodeURIComponent(q)
+    );
+
+    const d = await r.json();
+
+    if (!r.ok) {
+      throw new Error(
+        d.error || "取得に失敗しました"
+      );
+    }
+
+    DATA = d;
+
+    render(d);
+
+    $("#error").textContent = "";
+
+    show("analysis");
+
+  } catch (e) {
+    $("#error").textContent =
+      e.message ||
+      "エラーが発生しました。";
+  }
+}
+
+/* =========================
+   分析画面
+========================= */
+
+function render(d) {
+
+  const channel = d.channel || {};
+  const analysis = d.analysis || {};
+
+  $("#channelCard").innerHTML = `
+    <img
+      src="${esc(channel.thumbnail || "")}"
+      alt=""
+    >
+
+    <div>
+      <h2>
+        ${esc(channel.title || "")}
+      </h2>
+
+      <div class="sub">
+        ${
+          d.live
+            ? "🔴 LIVE中"
+            : "⚪ 現在LIVEなし"
+        }
+
+       　
+        取得コメント
+        ${Number(d.totalComments || 0).toLocaleString()}件
+      </div>
+
+      ${
+        d.live
+          ? `
+            <a
+              href="${esc(d.live.url || "")}"
+              target="_blank"
+              rel="noopener"
+              style="color:#79a0ff"
+            >
+              YouTubeでLIVEを見る ↗
+            </a>
+          `
+          : ""
+      }
+    </div>
+  `;
+
+  /* チャット稼ぎ度 */
+
+  const score =
+    Number(analysis.score || 0);
+
+  const consecutiveRate =
+    Number(
+      analysis.consecutiveRate || 0
+    );
+
+  if ($("#score")) {
+    $("#score").textContent =
+      `${score} / 100`;
+  }
+
+  if ($("#scoreText")) {
+    $("#scoreText").textContent =
+      score >= 70
+        ? "連投傾向が高め"
+        : score >= 40
+          ? "中程度"
+          : "低め";
+  }
+
+  if ($("#rateText")) {
+    $("#rateText").innerHTML = `
+      普通のチャット
+      <b>${Math.max(
+        0,
+        100 - consecutiveRate
+      )}%</b>
+
+     　
+
+      連投チャット
+      <b>${consecutiveRate}%</b>
+    `;
+  }
+
+  /* =========================
+     円グラフ
+  ========================= */
+
+  if ($("#pie")) {
+
+    if (pieChart) {
+      pieChart.destroy();
+    }
+
+    pieChart = new Chart(
+      $("#pie"),
+      {
+        type: "doughnut",
+
+        data: {
+          labels: [
+            "普通のチャット",
+            "連投チャット"
+          ],
+
+          datasets: [
+            {
+              data: [
+                Number(
+                  analysis.normalCount || 0
+                ),
+
+                Number(
+                  analysis.consecutiveCount || 0
+                )
+              ]
+            }
+          ]
+        },
+
+        options: {
+          plugins: {
+            legend: {
+              labels: {
+                color: "#fff"
+              }
+            }
+          }
+        }
+      }
+    );
+  }
+
+  /* =========================
+     コメント/分グラフ
+  ========================= */
+
+  if ($("#minuteChart")) {
+
+    if (minuteChart) {
+      minuteChart.destroy();
+    }
+
+    const minute = d.minute || {
+      labels: [],
+      values: [],
+      average: 0,
+      peak: 0,
+      peakIndex: -1
+    };
+
+    minuteChart = new Chart(
+      $("#minuteChart"),
+      {
+        type: "line",
+
+        data: {
+          labels:
+            minute.labels || [],
+
+          datasets: [
+            {
+              label: "コメント/分",
+
+              data:
+                minute.values || [],
+
+              tension: 0.25,
+
+              fill: false
+            }
+          ]
+        },
+
+        options: {
+          scales: {
+
+            x: {
+              ticks: {
+                color: "#9aa4b5"
+              }
+            },
+
+            y: {
+              beginAtZero: true,
+
+              ticks: {
+                color: "#9aa4b5"
+              }
+            }
+          },
+
+          plugins: {
+            legend: {
+              labels: {
+                color: "#fff"
+              }
+            }
+          }
+        }
+      }
+    );
+
+    if ($("#minuteStats")) {
+      $("#minuteStats").innerHTML = `
+        平均
+        <b>${Number(
+          minute.average || 0
+        )}</b>
+        コメント/分
+
+        ・
+
+        最大
+        <b>${Number(
+          minute.peak || 0
+        )}</b>
+        コメント/分
+      `;
+    }
+
+    const pi =
+      Number(minute.peakIndex);
+
+    if (
+      $("#peak") &&
+      pi >= 0 &&
+      minute.labels &&
+      minute.labels[pi] !== undefined
+    ) {
+
+      $("#peak").innerHTML = `
+        <b>
+          ${esc(minute.labels[pi])}
+        </b>
+        に
+        <b>
+          ${Number(minute.peak || 0)}
+        </b>
+        コメント/分でした。
+      `;
+
+    } else if ($("#peak")) {
+
+      $("#peak").textContent =
+        "データがありません。";
+    }
+
+    /* 急増 */
+
+    if ($("#spikes")) {
+
+      const vals =
+        minute.values || [];
+
+      const avg =
+        Number(minute.average || 0);
+
+      const spikes =
+        vals
+          .map((v, i) => ({
+            v: Number(v),
+            i
+          }))
+          .filter(x =>
+            avg &&
+            x.v >= avg * 2
+          )
+          .slice(-5);
+
+      $("#spikes").innerHTML =
+        spikes.length
+          ? spikes
+              .map(x => `
+                🚨
+                ${esc(
+                  minute.labels[x.i]
+                )}：
+                ${x.v}件
+                （平均の${(
+                  x.v / avg
+                ).toFixed(1)}倍）
+              `)
+              .join("<br>")
+          : "大きな急増は見つかりませんでした。";
+    }
+  }
+
+  /* =========================
+     ユーザーランキング
+  ========================= */
+
+  renderUsers();
+
+  renderRanking();
+}
+
+/* =========================
+   ユーザー表示
+========================= */
+
+function renderUsers() {
+
+  if (!DATA || !$("#userPreview")) {
+    return;
+  }
+
+  const users =
+    DATA.analysis?.users || [];
+
+  $("#userPreview").innerHTML =
+    users
+      .slice(0, 5)
+      .map((u, i) => `
+        <div class="rank">
+
+          <div class="num">
+            ${i + 1}
+          </div>
+
+          <div>
+
+            <b>
+              ${esc(u.name)}
+            </b>
+
+            <div class="sub">
+              連投最大
+              ${Number(
+                u.maxStreak || 0
+              )}
+
+              ・平均
+              ${Number(
+                u.averageLength || 0
+              )}文字
+            </div>
+
+          </div>
+
+          <b>
+            ${Number(
+              u.count || 0
+            ).toLocaleString()}件
+          </b>
+
+        </div>
+      `)
+      .join("")
+      ||
+      "データがありません。";
+}
+
+/* =========================
+   期間ボタン
+   今日 / 7日 / 30日 / 全期間
+========================= */
+
+$$(".filter").forEach(button => {
+
+  button.addEventListener(
+    "click",
+    () => {
+
+      $$(".filter").forEach(x => {
+        x.classList.remove("active");
+      });
+
+      button.classList.add("active");
+
+      period =
+        button.textContent.trim();
+
+      renderRanking();
+    }
+  );
+
+});
+
+/* =========================
+   ランキングタブ
+========================= */
+
+$$(".tab").forEach(button => {
+
+  button.addEventListener(
+    "click",
+    () => {
+
+      $$(".tab").forEach(x => {
+        x.classList.remove("active");
+      });
+
+      button.classList.add("active");
+
+      rankType =
+        button.dataset.rank ||
+        "comments";
+
+      renderRanking();
+    }
+  );
+
+});
+
+/* =========================
+   ランキング検索
+========================= */
+
+const rankSearch =
+  $("#rankSearch");
+
+if (rankSearch) {
+
+  rankSearch.addEventListener(
+    "input",
+    renderRanking
+  );
+
+}
+
+/* =========================
+   ランキング表示
+========================= */
+
+function renderRanking() {
+
+  if (!DATA) {
+    return;
+  }
+
+  const users =
+    DATA.analysis?.users || [];
+
+  let rows =
+    users.map(u => {
+
+      let metric;
+
+      if (rankType === "streak") {
+
+        metric =
+          Number(
+            u.maxStreak || 0
+          );
+
+      } else {
+
+        metric =
+          Number(
+            u.count || 0
+          );
+      }
+
+      return {
+        ...u,
+        metric
+      };
+
+    });
+
+  /* 大きい順 */
+
+  rows.sort(
+    (a, b) =>
+      b.metric - a.metric
+  );
+
+  /* 検索 */
+
+  const search =
+    rankSearch
+      ? rankSearch.value
+          .trim()
+          .toLowerCase()
+      : "";
+
+  rows =
+    rows.filter(u => {
+
+      if (!search) {
+        return true;
+      }
+
+      return String(
+        u.name || ""
+      )
+        .toLowerCase()
+        .includes(search);
+    });
+
+  if (!$("#rankingList")) {
+    return;
+  }
+
+  $("#rankingList").innerHTML =
+    rows
+      .slice(0, 100)
+      .map((u, i) => `
+
+        <div class="rank">
+
+          <div class="num">
+            ${i + 1}
+          </div>
+
+          <div>
+
+            <b>
+              ${esc(u.name)}
+            </b>
+
+            <div class="sub">
+
+              コメント
+              ${Number(
+                u.count || 0
+              ).toLocaleString()}
+
+              ・連投最大
+              ${Number(
+                u.maxStreak || 0
+              )}
+
+              ・平均
+              ${Number(
+                u.averageLength || 0
+              )}文字
+
+            </div>
+
+          </div>
+
+          <b>
+            ${Number(
+              u.metric || 0
+            ).toLocaleString()}
+          </b>
+
+        </div>
+
+      `)
+      .join("")
+      ||
+      "該当するユーザーがいません。";
+}
+
+/* =========================
+   HTMLエスケープ
+========================= */
+
+function esc(s) {
+
+  return String(
+    s ?? ""
+  ).replace(
+    /[&<>"']/g,
+
+    c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[c])
+  );
+}
+
+/* =========================
+   初期画面
+========================= */
+
+show("home");
