@@ -1142,56 +1142,12 @@ function analyzeLiveChat(messages) {
   /*
    * 連投率
    */
-  const consecutiveRate =
-    messages.length
-      ? Math.round(
-          (
-            consecutiveCount /
-            messages.length
-          ) * 100
-        )
-      : 0;
-
-  /*
-   * 分ごとのデータ
-   */
-  const minuteEntries =
-    [...minuteMap.entries()]
-      .sort(
-        (a, b) =>
-          new Date(a[0]) -
-          new Date(b[0])
-      );
-
-  const minuteLabels =
-    minuteEntries.map(
-      ([key]) => {
-        const d =
-          new Date(key);
-
-        return d.toLocaleTimeString(
-          "ja-JP",
-          {
-            hour: "2-digit",
-            minute: "2-digit"
-          }
-        );
-      }
-    );
-
-  const minuteValues =
-    minuteEntries.map(
-      ([, value]) =>
-        value
-    );
-
-  const average =
+   const average =
     minuteValues.length
       ? Math.round(
           (
             minuteValues.reduce(
-              (a, b) =>
-                a + b,
+              (a, b) => a + b,
               0
             ) /
             minuteValues.length
@@ -1206,14 +1162,616 @@ function analyzeLiveChat(messages) {
         )
       : 0;
 
-  const peakI
+  const peakIndex =
+    minuteValues.length
+      ? minuteValues.indexOf(peak)
+      : -1;
 
-const peakIndex =
-  minuteValues.length
-    ? minuteValues.indexOf(peak)
-    : -1;
+  const peakTime =
+    peakIndex >= 0
+      ? minuteLabels[peakIndex]
+      : null;
 
-const peakTime =
-  peakIndex >= 0
-    ? minuteLabels[peakIndex]
-    : null;
+  /*
+   * チャット急増
+   */
+  const spikes = [];
+
+  if (
+    minuteValues.length >= 2
+  ) {
+    for (
+      let i = 1;
+      i < minuteValues.length;
+      i++
+    ) {
+      const before =
+        minuteValues[i - 1];
+
+      const current =
+        minuteValues[i];
+
+      if (
+        current >= 10 &&
+        current >= before * 2
+      ) {
+        spikes.push({
+          time:
+            minuteLabels[i],
+
+          count:
+            current,
+
+          previous:
+            before
+        });
+      }
+    }
+  }
+
+  /*
+   * ユーザーランキング
+   */
+  const userRanking =
+    [...users.values()]
+      .map(user => ({
+        name:
+          user.name,
+
+        count:
+          user.count,
+
+        maxStreak:
+          user.maxStreak,
+
+        averageLength:
+          user.count
+            ? Math.round(
+                user.totalLength /
+                user.count
+              )
+            : 0,
+
+        history:
+          user.history
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count
+      );
+
+  /*
+   * よく使われた言葉
+   */
+  const wordRanking =
+    [...words.entries()]
+      .map(
+        ([word, count]) => ({
+          word,
+          count
+        })
+      )
+      .sort(
+        (a, b) =>
+          b.count - a.count
+      )
+      .slice(0, 50);
+
+  /*
+   * 連投率
+   */
+  const consecutiveRate =
+    messages.length
+      ? Math.round(
+          (
+            consecutiveCount /
+            messages.length
+          ) * 100
+        )
+      : 0;
+
+  return {
+    total:
+      messages.length,
+
+    consecutiveCount,
+
+    consecutiveRate,
+
+    users:
+      userRanking,
+
+    wordRanking,
+
+    minute: {
+      labels:
+        minuteLabels,
+
+      values:
+        minuteValues,
+
+      average,
+
+      peak,
+
+      peakTime,
+
+      peakIndex
+    },
+
+    spikes
+  };
+}
+
+
+/* =========================================================
+   現在LIVE中の配信を取得
+========================================================= */
+
+async function getCurrentLive(channelId) {
+  const data =
+    await youtube(
+      "search",
+      {
+        part: "snippet",
+        channelId,
+        eventType: "live",
+        type: "video",
+        maxResults: 1
+      }
+    );
+
+  const item =
+    data.items?.[0];
+
+  if (!item) {
+    return null;
+  }
+
+  const videoId =
+    item.id?.videoId;
+
+  if (!videoId) {
+    return null;
+  }
+
+  const videos =
+    await getVideos([
+      videoId
+    ]);
+
+  const video =
+    videos[0];
+
+  if (!video) {
+    return null;
+  }
+
+  return {
+    id:
+      video.id,
+
+    title:
+      video.title,
+
+    thumbnail:
+      video.thumbnail,
+
+    url:
+      `https://www.youtube.com/watch?v=${video.id}`,
+
+    views:
+      video.views,
+
+    likes:
+      video.likes,
+
+    comments:
+      video.comments,
+
+    activeLiveChatId:
+      video.activeLiveChatId,
+
+    concurrentViewers:
+      video.concurrentViewers
+  };
+}
+
+
+/* =========================================================
+   LIVEチャット取得
+========================================================= */
+
+async function getLiveChat(liveChatId) {
+  const messages = [];
+
+  let pageToken = "";
+
+  for (
+    let page = 0;
+    page < 10;
+    page++
+  ) {
+    const data =
+      await youtube(
+        "liveChat/messages",
+        {
+          liveChatId,
+
+          part:
+            "snippet,authorDetails",
+
+          maxResults:
+            2000,
+
+          pageToken
+        }
+      );
+
+    for (
+      const item of
+        data.items || []
+    ) {
+      const snippet =
+        item.snippet || {};
+
+      const author =
+        item.authorDetails || {};
+
+      const text =
+        snippet.displayMessage ||
+        snippet.textMessageDetails
+          ?.messageText ||
+        "";
+
+      messages.push({
+        id:
+          item.id,
+
+        videoId:
+          "",
+
+        author:
+          author.displayName ||
+          "Unknown",
+
+        authorChannelId:
+          author.channelId ||
+          "",
+
+        text,
+
+        publishedAt:
+          snippet.publishedAt ||
+          new Date().toISOString(),
+
+        likeCount:
+          0
+      });
+    }
+
+    pageToken =
+      data.nextPageToken ||
+      "";
+
+    if (!pageToken) {
+      break;
+    }
+  }
+
+  return messages;
+}
+
+
+/* =========================================================
+   LIVEチャット分析
+========================================================= */
+
+function analyzeLiveChat(messages) {
+  const users = new Map();
+
+  const words = new Map();
+
+  const minuteMap = new Map();
+
+  let consecutiveCount = 0;
+
+  let previous = null;
+
+  for (const message of messages) {
+    const name =
+      message.author ||
+      "Unknown";
+
+    if (!users.has(name)) {
+      users.set(name, {
+        name,
+        count: 0,
+        maxStreak: 0,
+        currentStreak: 0,
+        totalLength: 0,
+        history: []
+      });
+    }
+
+    const user =
+      users.get(name);
+
+    user.count++;
+
+    user.totalLength +=
+      String(
+        message.text || ""
+      ).length;
+
+    user.history.push({
+      text:
+        message.text || "",
+
+      publishedAt:
+        message.publishedAt
+    });
+
+    const currentTime =
+      new Date(
+        message.publishedAt
+      ).getTime();
+
+    if (
+      previous &&
+      previous.author === name &&
+      currentTime -
+        previous.time <=
+        10 * 1000
+    ) {
+      consecutiveCount++;
+
+      user.currentStreak++;
+
+      user.maxStreak =
+        Math.max(
+          user.maxStreak,
+          user.currentStreak
+        );
+    } else {
+      user.currentStreak = 1;
+    }
+
+    previous = {
+      author: name,
+      time: currentTime
+    };
+
+    const minute =
+      new Date(
+        message.publishedAt
+      );
+
+    minute.setSeconds(0, 0);
+
+    const minuteKey =
+      minute.toISOString();
+
+    minuteMap.set(
+      minuteKey,
+      (minuteMap.get(minuteKey) || 0) + 1
+    );
+
+    const cleanText =
+      String(
+        message.text || ""
+      )
+        .toLowerCase()
+        .replace(
+          /[「」『』！？。、,.!?()[\]{}<>:;'"`]/g,
+          " "
+        );
+
+    const splitWords =
+      cleanText
+        .split(/\s+/)
+        .filter(
+          word =>
+            word.length >= 2 &&
+            word.length <= 20
+        );
+
+    for (
+      const word of
+        splitWords
+    ) {
+      words.set(
+        word,
+        (words.get(word) || 0) + 1
+      );
+    }
+  }
+
+  const userRanking =
+    [...users.values()]
+      .map(user => ({
+        name:
+          user.name,
+
+        count:
+          user.count,
+
+        maxStreak:
+          user.maxStreak,
+
+        averageLength:
+          user.count
+            ? Math.round(
+                user.totalLength /
+                user.count
+              )
+            : 0,
+
+        history:
+          user.history
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count
+      );
+
+  const wordRanking =
+    [...words.entries()]
+      .map(
+        ([word, count]) => ({
+          word,
+          count
+        })
+      )
+      .sort(
+        (a, b) =>
+          b.count - a.count
+      )
+      .slice(0, 50);
+
+  const liveConsecutiveRate =
+    messages.length
+      ? Math.round(
+          (
+            consecutiveCount /
+            messages.length
+          ) * 100
+        )
+      : 0;
+
+  const liveMinuteEntries =
+    [...minuteMap.entries()]
+      .sort(
+        (a, b) =>
+          new Date(a[0]) -
+          new Date(b[0])
+      );
+
+  const liveMinuteLabels =
+    liveMinuteEntries.map(
+      ([key]) => {
+        const d =
+          new Date(key);
+
+        return d.toLocaleTimeString(
+          "ja-JP",
+          {
+            hour: "2-digit",
+            minute: "2-digit"
+          }
+        );
+      }
+    );
+
+  const liveMinuteValues =
+    liveMinuteEntries.map(
+      ([, value]) =>
+        value
+    );
+
+  const liveAverage =
+    liveMinuteValues.length
+      ? Math.round(
+          (
+            liveMinuteValues.reduce(
+              (a, b) => a + b,
+              0
+            ) /
+            liveMinuteValues.length
+          ) * 10
+        ) / 10
+      : 0;
+
+  const livePeak =
+    liveMinuteValues.length
+      ? Math.max(
+          ...liveMinuteValues
+        )
+      : 0;
+
+  const livePeakIndex =
+    liveMinuteValues.length
+      ? liveMinuteValues.indexOf(
+          livePeak
+        )
+      : -1;
+
+  const livePeakTime =
+    livePeakIndex >= 0
+      ? liveMinuteLabels[
+          livePeakIndex
+        ]
+      : null;
+
+  const liveSpikes = [];
+
+  if (
+    liveMinuteValues.length >= 2
+  ) {
+    for (
+      let i = 1;
+      i < liveMinuteValues.length;
+      i++
+    ) {
+      const before =
+        liveMinuteValues[i - 1];
+
+      const current =
+        liveMinuteValues[i];
+
+      if (
+        current >= 10 &&
+        current >= before * 2
+      ) {
+        liveSpikes.push({
+          time:
+            liveMinuteLabels[i],
+
+          count:
+            current,
+
+          previous:
+            before
+        });
+      }
+    }
+  }
+
+  return {
+    total:
+      messages.length,
+
+    consecutiveCount,
+
+    consecutiveRate:
+      liveConsecutiveRate,
+
+    users:
+      userRanking,
+
+    wordRanking,
+
+    minute: {
+      labels:
+        liveMinuteLabels,
+
+      values:
+        liveMinuteValues,
+
+      average:
+        liveAverage,
+
+      peak:
+        livePeak,
+
+      peakTime:
+        livePeakTime,
+
+      peakIndex:
+        livePeakIndex
+    },
+
+    spikes:
+      liveSpikes
+  };
+}
