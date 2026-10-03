@@ -1,53 +1,541 @@
+```html
 <!doctype html>
 <html lang="ja">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>チャット稼ぎチェッカー</title>
-<link rel="stylesheet" href="/style.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+
+  <title>チャット稼ぎチェッカー</title>
+
+  <link
+    rel="stylesheet"
+    href="/style.css"
+  >
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
+
 <body>
-<header><div class="brand">💬 <span>チャット稼ぎチェッカー</span></div></header>
+
+<header>
+  <div class="brand">
+    💬 <span>チャット稼ぎチェッカー</span>
+  </div>
+</header>
 
 <main>
-<section id="home" class="screen active">
-  <div class="hero">
-    <h1>YouTubeのチャットを分析</h1>
-    <p>コメント数・連投率・毎分コメント数などをまとめてチェック。</p>
-    <div class="search"><input id="channelInput" placeholder="YouTubeチャンネル名を入力"><button id="analyzeBtn">分析する</button></div>
-    <div id="error" class="error"></div>
-  </div>
-  <div class="grid two">
-    <div class="card"><h2>🔴 LIVE中</h2><p class="muted">分析したチャンネルのLIVE情報がここに表示されます。</p><div id="liveHome">まだ分析していません。</div></div>
-    <div class="card"><h2>⭐ お気に入り</h2><div id="favorites">まだありません。</div></div>
-  </div>
-</section>
 
-<section id="analysis" class="screen">
-  <div class="topbar"><button class="back" data-screen="home">← ホーム</button><div class="filters"><button class="filter active">今日</button><button class="filter">7日</button><button class="filter">30日</button><button class="filter">全期間</button></div></div>
-  <div id="channelCard" class="channel card"></div>
-  <div class="score card"><div><div class="label">💬 チャット稼ぎ度（サイト独自指標）</div><div id="score" class="big">-- / 100</div></div><div id="scoreText" class="badge">分析待ち</div></div>
-  <div class="grid two">
-    <div class="card"><h2>📊 普通のチャット vs 連投チャット</h2><canvas id="pie"></canvas><div id="rateText" class="stats"></div></div>
-    <div class="card"><h2>📈 コメント数/分</h2><canvas id="minuteChart"></canvas><div id="minuteStats" class="stats"></div></div>
-  </div>
-  <div class="grid two">
-    <div class="card"><h2>🚨 コメント急増</h2><div id="spikes">分析データがありません。</div></div>
-    <div class="card"><h2>⏱️ コメント集中時間</h2><div id="peak">分析データがありません。</div></div>
-  </div>
-  <div class="card"><h2>👑 ユーザー分析</h2><div id="userPreview"></div><button class="wide" data-screen="ranking">ランキングを見る →</button></div>
-</section>
+  <!-- =========================
+       ホーム
+  ========================== -->
 
-<section id="ranking" class="screen">
-  <div class="topbar"><button class="back" data-screen="analysis">← 分析</button></div>
-  <h1>🏆 ランキング</h1>
-  <div class="tabs"><button class="tab active" data-rank="comments">💬 コメント</button><button class="tab" data-rank="streak">🔥 連投</button><button class="tab" data-rank="users">👑 ユーザー</button></div>
-  <div class="card"><input id="rankSearch" class="rankSearch" placeholder="🔍 コメント・ユーザーを検索"><div id="rankingList"></div></div>
-</section>
+  <section
+    id="home"
+    class="screen active"
+  >
+
+    <div class="hero">
+
+      <h1>
+        YouTubeのコメント・チャットを分析
+      </h1>
+
+      <p>
+        通常動画のコメントとLIVEチャットを分けて分析できます。
+      </p>
+
+      <div class="search">
+
+        <input
+          id="channelInput"
+          placeholder="YouTubeチャンネル名を入力"
+        >
+
+        <button id="analyzeBtn">
+          分析する
+        </button>
+
+      </div>
+
+      <div
+        id="error"
+        class="error"
+      ></div>
+
+    </div>
+
+
+    <div class="grid two">
+
+      <!-- LIVE -->
+
+      <div class="card">
+
+        <h2>
+          🔴 LIVE中
+        </h2>
+
+        <p class="muted">
+          分析したチャンネルのLIVE情報
+        </p>
+
+        <div id="liveHome">
+          まだ分析していません。
+        </div>
+
+      </div>
+
+
+      <!-- お気に入り -->
+
+      <div class="card">
+
+        <h2>
+          ⭐ お気に入り
+        </h2>
+
+        <div id="favorites">
+          まだありません。
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- =========================
+       分析
+  ========================== -->
+
+  <section
+    id="analysis"
+    class="screen"
+  >
+
+    <div class="topbar">
+
+      <button
+        class="back"
+        data-screen="home"
+      >
+        ← ホーム
+      </button>
+
+      <div class="filters">
+
+        <button class="filter active">
+          今日
+        </button>
+
+        <button class="filter">
+          7日
+        </button>
+
+        <button class="filter">
+          30日
+        </button>
+
+        <button class="filter">
+          全期間
+        </button>
+
+      </div>
+
+    </div>
+
+
+    <!-- チャンネル -->
+
+    <div
+      id="channelCard"
+      class="channel card"
+    ></div>
+
+
+    <!-- スコア -->
+
+    <div class="score card">
+
+      <div>
+
+        <div class="label">
+          💬 チャット稼ぎ度（サイト独自指標）
+        </div>
+
+        <div
+          id="score"
+          class="big"
+        >
+          -- / 100
+        </div>
+
+      </div>
+
+      <div
+        id="scoreText"
+        class="badge"
+      >
+        分析待ち
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         コメント / チャット比率
+    ========================== -->
+
+    <div class="grid two">
+
+      <div class="card">
+
+        <h2>
+          📊 通常コメント vs 連投
+        </h2>
+
+        <canvas id="pie"></canvas>
+
+        <div
+          id="rateText"
+          class="stats"
+        ></div>
+
+      </div>
+
+
+      <div class="card">
+
+        <h2>
+          📈 コメント・チャット数/分
+        </h2>
+
+        <canvas id="minuteChart"></canvas>
+
+        <div
+          id="minuteStats"
+          class="stats"
+        ></div>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         急増 / ピーク
+    ========================== -->
+
+    <div class="grid two">
+
+      <div class="card">
+
+        <h2>
+          🚨 チャット急増
+        </h2>
+
+        <div id="spikes">
+          分析データがありません。
+        </div>
+
+      </div>
+
+
+      <div class="card">
+
+        <h2>
+          ⏱️ チャット集中時間
+        </h2>
+
+        <div id="peak">
+          分析データがありません。
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         LIVEチャット専用
+    ========================== -->
+
+    <div
+      id="liveChatSection"
+      class="card"
+    >
+
+      <div class="liveSectionTitle">
+
+        <span class="liveBadge">
+          🔴 LIVE
+        </span>
+
+        <h2>
+          LIVEチャット分析
+        </h2>
+
+      </div>
+
+
+      <!-- チャット連投率 -->
+
+      <div class="liveStatsGrid">
+
+        <div class="liveStat">
+
+          <div class="liveStatLabel">
+            💬 チャット総数
+          </div>
+
+          <div
+            id="liveChatTotal"
+            class="liveStatValue"
+          >
+            --
+          </div>
+
+        </div>
+
+
+        <div class="liveStat">
+
+          <div class="liveStatLabel">
+            🔥 連投チャット
+          </div>
+
+          <div
+            id="liveChatConsecutive"
+            class="liveStatValue"
+          >
+            --
+          </div>
+
+        </div>
+
+
+        <div class="liveStat">
+
+          <div class="liveStatLabel">
+            🔥 チャット連投率
+          </div>
+
+          <div
+            id="liveChatRate"
+            class="liveStatValue"
+          >
+            --%
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- =========================
+           よく使われた言葉
+      ========================== -->
+
+      <div class="liveWords">
+
+        <h3>
+          🔤 よく使われた言葉ランキング
+        </h3>
+
+        <div
+          id="liveWordRanking"
+          class="wordRanking"
+        >
+          チャットデータがありません。
+        </div>
+
+      </div>
+
+
+      <!-- =========================
+           チャットランキング
+      ========================== -->
+
+      <div class="liveUsers">
+
+        <h3>
+          👑 チャット数ランキング
+        </h3>
+
+        <div
+          id="liveChatRanking"
+          class="liveChatRanking"
+        >
+          チャットデータがありません。
+        </div>
+
+      </div>
+
+
+      <!-- =========================
+           急増
+      ========================== -->
+
+      <div class="liveSpikes">
+
+        <h3>
+          🚨 チャット急増
+        </h3>
+
+        <div
+          id="liveChatSpikes"
+        >
+          チャットデータがありません。
+        </div>
+
+      </div>
+
+
+      <!-- =========================
+           ピーク
+      ========================== -->
+
+      <div class="livePeak">
+
+        <h3>
+          ⏱️ 最も盛り上がった時間
+        </h3>
+
+        <div
+          id="liveChatPeak"
+        >
+          チャットデータがありません。
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         ユーザー分析
+    ========================== -->
+
+    <div class="card">
+
+      <h2>
+        👑 ユーザー分析
+      </h2>
+
+      <div id="userPreview"></div>
+
+      <button
+        class="wide"
+        data-screen="ranking"
+      >
+        ランキングを見る →
+      </button>
+
+    </div>
+
+  </section>
+
+
+  <!-- =========================
+       ランキング
+  ========================== -->
+
+  <section
+    id="ranking"
+    class="screen"
+  >
+
+    <div class="topbar">
+
+      <button
+        class="back"
+        data-screen="analysis"
+      >
+        ← 分析
+      </button>
+
+    </div>
+
+
+    <h1>
+      🏆 ランキング
+    </h1>
+
+
+    <div class="tabs">
+
+      <button
+        class="tab active"
+        data-rank="comments"
+      >
+        💬 コメント
+      </button>
+
+      <button
+        class="tab"
+        data-rank="streak"
+      >
+        🔥 連投
+      </button>
+
+      <button
+        class="tab"
+        data-rank="users"
+      >
+        👑 ユーザー
+      </button>
+
+    </div>
+
+
+    <div class="card">
+
+      <input
+        id="rankSearch"
+        class="rankSearch"
+        placeholder="🔍 コメント・ユーザーを検索"
+      >
+
+      <div id="rankingList"></div>
+
+    </div>
+
+  </section>
+
 </main>
 
-<nav><button data-screen="home">🏠<small>ホーム</small></button><button data-screen="analysis">📊<small>分析</small></button><button data-screen="ranking">🏆<small>ランキング</small></button></nav>
+
+<!-- =========================
+     スマホ用ナビ
+========================== -->
+
+<nav>
+
+  <button data-screen="home">
+    🏠
+    <small>ホーム</small>
+  </button>
+
+  <button data-screen="analysis">
+    📊
+    <small>分析</small>
+  </button>
+
+  <button data-screen="ranking">
+    🏆
+    <small>ランキング</small>
+  </button>
+
+</nav>
+
+
 <script src="/app.js"></script>
+
 </body>
-  </html>
+</html>
+```
