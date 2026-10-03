@@ -8,10 +8,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.YOUTUBE_API_KEY;
 
-if (!API_KEY) {
-  console.warn("WARNING: YOUTUBE_API_KEY is not set.");
-}
-
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -21,14 +17,20 @@ app.use(express.static(path.join(__dirname, "public")));
 ========================================================= */
 
 async function youtube(endpoint, params = {}) {
+  if (!API_KEY) {
+    throw new Error("YOUTUBE_API_KEY が設定されていません。");
+  }
+
   const url = new URL(
     `https://www.googleapis.com/youtube/v3/${endpoint}`
   );
 
-  Object.entries({
+  const allParams = {
     ...params,
     key: API_KEY
-  }).forEach(([key, value]) => {
+  };
+
+  for (const [key, value] of Object.entries(allParams)) {
     if (
       value !== undefined &&
       value !== null &&
@@ -36,18 +38,15 @@ async function youtube(endpoint, params = {}) {
     ) {
       url.searchParams.set(key, value);
     }
-  });
+  }
 
   const response = await fetch(url);
-
   const data = await response.json();
 
   if (!response.ok) {
-    const message =
-      data?.error?.message ||
-      "YouTube API request failed";
-
-    throw new Error(message);
+    throw new Error(
+      data?.error?.message || "YouTube API error"
+    );
   }
 
   return data;
@@ -55,17 +54,21 @@ async function youtube(endpoint, params = {}) {
 
 
 /* =========================================================
-   共通
+   共通関数
 ========================================================= */
 
-function getPeriodCutoff(period) {
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+
+function cutoffFor(period) {
   const now = Date.now();
 
   if (period === "today") {
     const d = new Date();
-
     d.setHours(0, 0, 0, 0);
-
     return d.getTime();
   }
 
@@ -78,15 +81,6 @@ function getPeriodCutoff(period) {
   }
 
   return 0;
-}
-
-
-function safeNumber(value) {
-  const number = Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : 0;
 }
 
 
@@ -132,8 +126,7 @@ async function getChannel(channelId) {
     id: item.id,
 
     title:
-      item.snippet?.title ||
-      "Unknown",
+      item.snippet?.title || "Unknown",
 
     thumbnail:
       item.snippet?.thumbnails?.high?.url ||
@@ -142,19 +135,13 @@ async function getChannel(channelId) {
       "",
 
     subscribers:
-      safeNumber(
-        item.statistics?.subscriberCount
-      ),
+      number(item.statistics?.subscriberCount),
 
     views:
-      safeNumber(
-        item.statistics?.viewCount
-      ),
+      number(item.statistics?.viewCount),
 
     videoCount:
-      safeNumber(
-        item.statistics?.videoCount
-      ),
+      number(item.statistics?.videoCount),
 
     uploadsPlaylistId:
       item.contentDetails?.relatedPlaylists?.uploads ||
@@ -164,22 +151,20 @@ async function getChannel(channelId) {
 
 
 /* =========================================================
-   動画一覧
+   チャンネル動画一覧
 ========================================================= */
 
-async function getChannelVideos(
-  uploadsPlaylistId,
-  period
-) {
-  const cutoff = getPeriodCutoff(period);
+async function getChannelVideos(playlistId, period) {
+  if (!playlistId) {
+    return [];
+  }
 
-  const result = [];
+  const cutoff = cutoffFor(period);
+
+  const videos = [];
 
   let pageToken = "";
 
-  /*
-   * 期間に応じて取得数を調整
-   */
   let maxPages = 1;
 
   if (period === "today") {
@@ -193,15 +178,12 @@ async function getChannelVideos(
   }
 
   for (let page = 0; page < maxPages; page++) {
-    const data = await youtube(
-      "playlistItems",
-      {
-        part: "snippet,contentDetails",
-        playlistId: uploadsPlaylistId,
-        maxResults: 50,
-        pageToken
-      }
-    );
+    const data = await youtube("playlistItems", {
+      part: "snippet,contentDetails",
+      playlistId,
+      maxResults: 50,
+      pageToken
+    });
 
     for (const item of data.items || []) {
       const snippet = item.snippet || {};
@@ -211,8 +193,7 @@ async function getChannelVideos(
         item.contentDetails?.videoPublishedAt ||
         "";
 
-      const time =
-        new Date(publishedAt).getTime();
+      const time = new Date(publishedAt).getTime();
 
       if (
         cutoff > 0 &&
@@ -229,12 +210,11 @@ async function getChannelVideos(
         continue;
       }
 
-      result.push({
+      videos.push({
         id: videoId,
 
         title:
-          snippet.title ||
-          "Untitled",
+          snippet.title || "Untitled",
 
         thumbnail:
           snippet.thumbnails?.high?.url ||
@@ -245,12 +225,7 @@ async function getChannelVideos(
         publishedAt,
 
         url:
-          `https://www.youtube.com/watch?v=${videoId}`,
-
-        type:
-          snippet.liveBroadcastContent === "live"
-            ? "live"
-            : "video"
+          `https://www.youtube.com/watch?v=${videoId}`
       });
     }
 
@@ -260,14 +235,9 @@ async function getChannelVideos(
     if (!pageToken) {
       break;
     }
-
-    /*
-     * 古い順ではないので、
-     * 期間外になった後も少し取得する。
-     */
   }
 
-  return result;
+  return videos;
 }
 
 
@@ -275,39 +245,30 @@ async function getChannelVideos(
    動画詳細
 ========================================================= */
 
-async function getVideos(videoIds) {
+async function getVideos(ids) {
   const result = [];
 
-  for (
-    let i = 0;
-    i < videoIds.length;
-    i += 50
-  ) {
-    const ids =
-      videoIds
-        .slice(i, i + 50)
-        .join(",");
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
 
-    if (!ids) {
+    if (!chunk.length) {
       continue;
     }
 
-    const data = await youtube(
-      "videos",
-      {
-        part:
-          "snippet,statistics,liveStreamingDetails",
-        id: ids
-      }
-    );
+    const data = await youtube("videos", {
+      part:
+        "snippet,statistics,liveStreamingDetails",
+
+      id:
+        chunk.join(",")
+    });
 
     for (const item of data.items || []) {
       result.push({
         id: item.id,
 
         title:
-          item.snippet?.title ||
-          "Untitled",
+          item.snippet?.title || "Untitled",
 
         thumbnail:
           item.snippet?.thumbnails?.high?.url ||
@@ -316,23 +277,16 @@ async function getVideos(videoIds) {
           "",
 
         publishedAt:
-          item.snippet?.publishedAt ||
-          "",
+          item.snippet?.publishedAt || "",
 
         views:
-          safeNumber(
-            item.statistics?.viewCount
-          ),
+          number(item.statistics?.viewCount),
 
         likes:
-          safeNumber(
-            item.statistics?.likeCount
-          ),
+          number(item.statistics?.likeCount),
 
         comments:
-          safeNumber(
-            item.statistics?.commentCount
-          ),
+          number(item.statistics?.commentCount),
 
         liveBroadcastContent:
           item.snippet?.liveBroadcastContent ||
@@ -344,7 +298,7 @@ async function getVideos(videoIds) {
           null,
 
         concurrentViewers:
-          safeNumber(
+          number(
             item.liveStreamingDetails
               ?.concurrentViewers
           )
@@ -357,17 +311,14 @@ async function getVideos(videoIds) {
 
 
 /* =========================================================
-   コメント取得
+   通常動画のコメント取得
 ========================================================= */
 
-async function getVideoComments(videoId) {
+async function getComments(videoId) {
   const comments = [];
 
   let pageToken = "";
 
-  /*
-   * 1動画につき最大10ページ
-   */
   for (let page = 0; page < 10; page++) {
     const data = await youtube(
       "commentThreads",
@@ -383,8 +334,7 @@ async function getVideoComments(videoId) {
 
     for (const item of data.items || []) {
       const snippet =
-        item.snippet?.topLevelComment
-          ?.snippet;
+        item.snippet?.topLevelComment?.snippet;
 
       if (!snippet) {
         continue;
@@ -414,9 +364,7 @@ async function getVideoComments(videoId) {
           new Date().toISOString(),
 
         likeCount:
-          safeNumber(
-            snippet.likeCount
-          )
+          number(snippet.likeCount)
       });
     }
 
@@ -438,17 +386,14 @@ async function getVideoComments(videoId) {
 
 function analyzeComments(comments) {
   const users = new Map();
+  const minuteMap = new Map();
 
   let consecutiveCount = 0;
-
   let previous = null;
-
-  const minuteMap = new Map();
 
   for (const comment of comments) {
     const name =
-      comment.author ||
-      "Unknown";
+      comment.author || "Unknown";
 
     if (!users.has(name)) {
       users.set(name, {
@@ -462,8 +407,7 @@ function analyzeComments(comments) {
       });
     }
 
-    const user =
-      users.get(name);
+    const user = users.get(name);
 
     user.count++;
 
@@ -490,15 +434,10 @@ function analyzeComments(comments) {
         comment.publishedAt
       ).getTime();
 
-    /*
-     * 同じユーザーが10秒以内に
-     * 続けて投稿した場合を連投扱い
-     */
     if (
       previous &&
       previous.author === name &&
-      currentTime - previous.time <=
-        10 * 1000
+      currentTime - previous.time <= 10000
     ) {
       consecutiveCount++;
 
@@ -518,31 +457,28 @@ function analyzeComments(comments) {
       time: currentTime
     };
 
-    /*
-     * 1分ごとの件数
-     */
     const minute =
-      new Date(
-        comment.publishedAt
-      );
+      new Date(comment.publishedAt);
 
     minute.setSeconds(0, 0);
 
-    const minuteKey =
+    const key =
       minute.toISOString();
 
     minuteMap.set(
-      minuteKey,
-      (minuteMap.get(minuteKey) || 0) + 1
+      key,
+      (minuteMap.get(key) || 0) + 1
     );
   }
 
-  const userRanking =
+  const usersRanking =
     [...users.values()]
       .map(user => ({
-        name: user.name,
+        name:
+          user.name,
 
-        count: user.count,
+        count:
+          user.count,
 
         maxStreak:
           user.maxStreak,
@@ -569,15 +505,12 @@ function analyzeComments(comments) {
   const consecutiveRate =
     comments.length
       ? Math.round(
-          (consecutiveCount /
-            comments.length) *
-            100
+          consecutiveCount /
+          comments.length *
+          100
         )
       : 0;
 
-  /*
-   * 分ごとのグラフ
-   */
   const minuteEntries =
     [...minuteMap.entries()]
       .sort(
@@ -589,10 +522,10 @@ function analyzeComments(comments) {
   const minuteLabels =
     minuteEntries.map(
       ([key]) => {
-        const date =
+        const d =
           new Date(key);
 
-        return date.toLocaleTimeString(
+        return d.toLocaleTimeString(
           "ja-JP",
           {
             hour: "2-digit",
@@ -604,19 +537,19 @@ function analyzeComments(comments) {
 
   const minuteValues =
     minuteEntries.map(
-      ([, value]) => value
+      ([, value]) =>
+        value
     );
 
   const average =
     minuteValues.length
       ? Math.round(
-          (
-            minuteValues.reduce(
-              (a, b) => a + b,
-              0
-            ) /
-            minuteValues.length
-          ) * 10
+          minuteValues.reduce(
+            (a, b) => a + b,
+            0
+          ) /
+          minuteValues.length *
+          10
         ) / 10
       : 0;
 
@@ -637,47 +570,36 @@ function analyzeComments(comments) {
       ? minuteLabels[peakIndex]
       : null;
 
-  /*
-   * チャット急増
-   */
   const spikes = [];
 
-  if (minuteValues.length >= 2) {
-    for (
-      let i = 1;
-      i < minuteValues.length;
-      i++
+  for (
+    let i = 1;
+    i < minuteValues.length;
+    i++
+  ) {
+    const before =
+      minuteValues[i - 1];
+
+    const current =
+      minuteValues[i];
+
+    if (
+      current >= 10 &&
+      current >= before * 2
     ) {
-      const before =
-        minuteValues[i - 1];
+      spikes.push({
+        time:
+          minuteLabels[i],
 
-      const current =
-        minuteValues[i];
+        count:
+          current,
 
-      if (
-        current >= 10 &&
-        current >= before * 2
-      ) {
-        spikes.push({
-          time:
-            minuteLabels[i],
-
-          count:
-            current,
-
-          previous:
-            before
-        });
-      }
+        previous:
+          before
+      });
     }
   }
 
-  /*
-   * 独自チャット稼ぎ度
-   *
-   * 連投率とコメント数を元にした
-   * サイト独自の参考値。
-   */
   const volumeScore =
     Math.min(
       50,
@@ -697,12 +619,12 @@ function analyzeComments(comments) {
   const score =
     Math.min(
       100,
-      volumeScore +
-      streakScore
+      volumeScore + streakScore
     );
 
   return {
-    users: userRanking,
+    users:
+      usersRanking,
 
     total:
       comments.length,
@@ -742,7 +664,7 @@ function analyzeComments(comments) {
 
 
 /* =========================================================
-   LIVE中の配信を取得
+   現在LIVE中か確認
 ========================================================= */
 
 async function getCurrentLive(channelId) {
@@ -750,576 +672,16 @@ async function getCurrentLive(channelId) {
     "search",
     {
       part: "snippet",
+
       channelId,
+
       eventType: "live",
+
       type: "video",
+
       maxResults: 1
     }
   );
-
-  const item =
-    data.items?.[0];
-
-  if (!item) {
-    return null;
-  }
-
-  const videoId =
-    item.id?.videoId;
-
-  if (!videoId) {
-    return null;
-  }
-
-  const videos =
-    await getVideos([
-      videoId
-    ]);
-
-  const video =
-    videos[0];
-
-  if (!video) {
-    return null;
-  }
-
-  return {
-    id: video.id,
-
-    title:
-      video.title,
-
-    thumbnail:
-      video.thumbnail,
-
-    url:
-      `https://www.youtube.com/watch?v=${video.id}`,
-
-    views:
-      video.views,
-
-    likes:
-      video.likes,
-
-    comments:
-      video.comments,
-
-    activeLiveChatId:
-      video.activeLiveChatId,
-
-    concurrentViewers:
-      video.concurrentViewers
-  };
-}
-
-
-/* =========================================================
-   LIVEチャット取得
-========================================================= */
-
-async function getLiveChat(liveChatId) {
-  const messages = [];
-
-  let pageToken = "";
-
-  /*
-   * API仕様上 maxResults は
-   * 200〜2000。
-   */
-  for (
-    let page = 0;
-    page < 10;
-    page++
-  ) {
-    const data =
-      await youtube(
-        "liveChat/messages",
-        {
-          liveChatId,
-
-          part:
-            "snippet,authorDetails",
-
-          maxResults:
-            2000,
-
-          pageToken
-        }
-      );
-
-    for (
-      const item of
-        data.items || []
-    ) {
-      const snippet =
-        item.snippet || {};
-
-      const author =
-        item.authorDetails || {};
-
-      /*
-       * テキストチャット以外の
-       * イベントも存在するため、
-       * displayMessage があるものを
-       * 主な分析対象にする。
-       */
-      const text =
-        snippet.displayMessage ||
-        snippet.textMessageDetails
-          ?.messageText ||
-        "";
-
-      messages.push({
-        id:
-          item.id,
-
-        videoId:
-          "",
-
-        author:
-          author.displayName ||
-          "Unknown",
-
-        authorChannelId:
-          author.channelId ||
-          "",
-
-        text,
-
-        publishedAt:
-          snippet.publishedAt ||
-          new Date().toISOString(),
-
-        likeCount: 0,
-
-        type:
-          snippet.type ||
-          "textMessageEvent"
-      });
-    }
-
-    pageToken =
-      data.nextPageToken ||
-      "";
-
-    if (!pageToken) {
-      break;
-    }
-  }
-
-  return messages;
-}
-
-
-/* =========================================================
-   LIVEチャット分析
-========================================================= */
-
-function analyzeLiveChat(messages) {
-  const users = new Map();
-
-  const words = new Map();
-
-  const minuteMap = new Map();
-
-  let consecutiveCount = 0;
-
-  let previous = null;
-
-  for (const message of messages) {
-    const name =
-      message.author ||
-      "Unknown";
-
-    if (!users.has(name)) {
-      users.set(name, {
-        name,
-
-        count: 0,
-
-        maxStreak: 0,
-
-        currentStreak: 0,
-
-        totalLength: 0,
-
-        history: []
-      });
-    }
-
-    const user =
-      users.get(name);
-
-    user.count++;
-
-    user.totalLength +=
-      String(
-        message.text || ""
-      ).length;
-
-    user.history.push({
-      text:
-        message.text || "",
-
-      publishedAt:
-        message.publishedAt
-    });
-
-    const currentTime =
-      new Date(
-        message.publishedAt
-      ).getTime();
-
-    /*
-     * 10秒以内の連続投稿
-     */
-    if (
-      previous &&
-      previous.author === name &&
-      currentTime -
-        previous.time <=
-        10 * 1000
-    ) {
-      consecutiveCount++;
-
-      user.currentStreak++;
-
-      user.maxStreak =
-        Math.max(
-          user.maxStreak,
-          user.currentStreak
-        );
-    } else {
-      user.currentStreak = 1;
-    }
-
-    previous = {
-      author: name,
-      time: currentTime
-    };
-
-    /*
-     * 1分ごとのチャット数
-     */
-    const minute =
-      new Date(
-        message.publishedAt
-      );
-
-    minute.setSeconds(0, 0);
-
-    const minuteKey =
-      minute.toISOString();
-
-    minuteMap.set(
-      minuteKey,
-      (minuteMap.get(minuteKey) || 0) + 1
-    );
-
-    /*
-     * 単語ランキング
-     *
-     * 日本語は空白区切りがないことが
-     * 多いので、簡易的な文字列分割も行う。
-     */
-    const cleanText =
-      String(
-        message.text || ""
-      )
-        .toLowerCase()
-        .replace(
-          /[「」『』！？。、,.!?()[\]{}<>:;'"`]/g,
-          " "
-        )
-        .trim();
-
-    const splitWords =
-      cleanText
-        .split(/\s+/)
-        .filter(
-          word =>
-            word.length >= 2 &&
-            word.length <= 20
-        );
-
-    for (
-      const word of
-        splitWords
-    ) {
-      words.set(
-        word,
-        (words.get(word) || 0) + 1
-      );
-    }
-
-    /*
-     * 日本語など空白のない文章用
-     * 2文字単位の簡易集計
-     */
-    const compact =
-      cleanText.replace(
-        /\s+/g,
-        ""
-      );
-
-    if (
-      compact.length >= 2 &&
-      compact.length <= 100
-    ) {
-      for (
-        let i = 0;
-        i < compact.length - 1;
-        i++
-      ) {
-        const twoChars =
-          compact.slice(
-            i,
-            i + 2
-          );
-
-        if (
-          /[^\x00-\x7F]/.test(
-            twoChars
-          )
-        ) {
-          words.set(
-            twoChars,
-            (words.get(twoChars) || 0) + 1
-          );
-        }
-      }
-    }
-  }
-
-  /*
-   * ユーザーランキング
-   */
-  const userRanking =
-    [...users.values()]
-      .map(user => ({
-        name:
-          user.name,
-
-        count:
-          user.count,
-
-        maxStreak:
-          user.maxStreak,
-
-        averageLength:
-          user.count
-            ? Math.round(
-                user.totalLength /
-                user.count
-              )
-            : 0,
-
-        history:
-          user.history
-      }))
-      .sort(
-        (a, b) =>
-          b.count - a.count
-      );
-
-  /*
-   * 単語ランキング
-   */
-  const wordRanking =
-    [...words.entries()]
-      .map(
-        ([word, count]) => ({
-          word,
-          count
-        })
-      )
-      .sort(
-        (a, b) =>
-          b.count - a.count
-      )
-      .slice(0, 50);
-
-  /*
-   * 連投率
-   */
-   const average =
-    minuteValues.length
-      ? Math.round(
-          (
-            minuteValues.reduce(
-              (a, b) => a + b,
-              0
-            ) /
-            minuteValues.length
-          ) * 10
-        ) / 10
-      : 0;
-
-  const peak =
-    minuteValues.length
-      ? Math.max(
-          ...minuteValues
-        )
-      : 0;
-
-  const peakIndex =
-    minuteValues.length
-      ? minuteValues.indexOf(peak)
-      : -1;
-
-  const peakTime =
-    peakIndex >= 0
-      ? minuteLabels[peakIndex]
-      : null;
-
-  /*
-   * チャット急増
-   */
-  const spikes = [];
-
-  if (
-    minuteValues.length >= 2
-  ) {
-    for (
-      let i = 1;
-      i < minuteValues.length;
-      i++
-    ) {
-      const before =
-        minuteValues[i - 1];
-
-      const current =
-        minuteValues[i];
-
-      if (
-        current >= 10 &&
-        current >= before * 2
-      ) {
-        spikes.push({
-          time:
-            minuteLabels[i],
-
-          count:
-            current,
-
-          previous:
-            before
-        });
-      }
-    }
-  }
-
-  /*
-   * ユーザーランキング
-   */
-  const userRanking =
-    [...users.values()]
-      .map(user => ({
-        name:
-          user.name,
-
-        count:
-          user.count,
-
-        maxStreak:
-          user.maxStreak,
-
-        averageLength:
-          user.count
-            ? Math.round(
-                user.totalLength /
-                user.count
-              )
-            : 0,
-
-        history:
-          user.history
-      }))
-      .sort(
-        (a, b) =>
-          b.count - a.count
-      );
-
-  /*
-   * よく使われた言葉
-   */
-  const wordRanking =
-    [...words.entries()]
-      .map(
-        ([word, count]) => ({
-          word,
-          count
-        })
-      )
-      .sort(
-        (a, b) =>
-          b.count - a.count
-      )
-      .slice(0, 50);
-
-  /*
-   * 連投率
-   */
-  const consecutiveRate =
-    messages.length
-      ? Math.round(
-          (
-            consecutiveCount /
-            messages.length
-          ) * 100
-        )
-      : 0;
-
-  return {
-    total:
-      messages.length,
-
-    consecutiveCount,
-
-    consecutiveRate,
-
-    users:
-      userRanking,
-
-    wordRanking,
-
-    minute: {
-      labels:
-        minuteLabels,
-
-      values:
-        minuteValues,
-
-      average,
-
-      peak,
-
-      peakTime,
-
-      peakIndex
-    },
-
-    spikes
-  };
-}
-
-
-/* =========================================================
-   現在LIVE中の配信を取得
-========================================================= */
-
-async function getCurrentLive(channelId) {
-  const data =
-    await youtube(
-      "search",
-      {
-        part: "snippet",
-        channelId,
-        eventType: "live",
-        type: "video",
-        maxResults: 1
-      }
-    );
 
   const item =
     data.items?.[0];
@@ -1387,31 +749,23 @@ async function getLiveChat(liveChatId) {
 
   let pageToken = "";
 
-  for (
-    let page = 0;
-    page < 10;
-    page++
-  ) {
-    const data =
-      await youtube(
-        "liveChat/messages",
-        {
-          liveChatId,
+  for (let page = 0; page < 10; page++) {
+    const data = await youtube(
+      "liveChat/messages",
+      {
+        liveChatId,
 
-          part:
-            "snippet,authorDetails",
+        part:
+          "snippet,authorDetails",
 
-          maxResults:
-            2000,
+        maxResults:
+          2000,
 
-          pageToken
-        }
-      );
+        pageToken
+      }
+    );
 
-    for (
-      const item of
-        data.items || []
-    ) {
+    for (const item of data.items || []) {
       const snippet =
         item.snippet || {};
 
@@ -1424,12 +778,13 @@ async function getLiveChat(liveChatId) {
           ?.messageText ||
         "";
 
+      if (!text) {
+        continue;
+      }
+
       messages.push({
         id:
           item.id,
-
-        videoId:
-          "",
 
         author:
           author.displayName ||
@@ -1443,16 +798,12 @@ async function getLiveChat(liveChatId) {
 
         publishedAt:
           snippet.publishedAt ||
-          new Date().toISOString(),
-
-        likeCount:
-          0
+          new Date().toISOString()
       });
     }
 
     pageToken =
-      data.nextPageToken ||
-      "";
+      data.nextPageToken || "";
 
     if (!pageToken) {
       break;
@@ -1469,13 +820,10 @@ async function getLiveChat(liveChatId) {
 
 function analyzeLiveChat(messages) {
   const users = new Map();
-
   const words = new Map();
-
   const minuteMap = new Map();
 
   let consecutiveCount = 0;
-
   let previous = null;
 
   for (const message of messages) {
@@ -1522,7 +870,7 @@ function analyzeLiveChat(messages) {
       previous.author === name &&
       currentTime -
         previous.time <=
-        10 * 1000
+        10000
     ) {
       consecutiveCount++;
 
@@ -1538,8 +886,11 @@ function analyzeLiveChat(messages) {
     }
 
     previous = {
-      author: name,
-      time: currentTime
+      author:
+        name,
+
+      time:
+        currentTime
     };
 
     const minute =
@@ -1549,12 +900,12 @@ function analyzeLiveChat(messages) {
 
     minute.setSeconds(0, 0);
 
-    const minuteKey =
+    const key =
       minute.toISOString();
 
     minuteMap.set(
-      minuteKey,
-      (minuteMap.get(minuteKey) || 0) + 1
+      key,
+      (minuteMap.get(key) || 0) + 1
     );
 
     const cleanText =
@@ -1567,7 +918,7 @@ function analyzeLiveChat(messages) {
           " "
         );
 
-    const splitWords =
+    const wordsInMessage =
       cleanText
         .split(/\s+/)
         .filter(
@@ -1577,8 +928,7 @@ function analyzeLiveChat(messages) {
         );
 
     for (
-      const word of
-        splitWords
+      const word of wordsInMessage
     ) {
       words.set(
         word,
@@ -1587,7 +937,7 @@ function analyzeLiveChat(messages) {
     }
   }
 
-  const userRanking =
+  const usersRanking =
     [...users.values()]
       .map(user => ({
         name:
@@ -1629,17 +979,16 @@ function analyzeLiveChat(messages) {
       )
       .slice(0, 50);
 
-  const liveConsecutiveRate =
+  const consecutiveRate =
     messages.length
       ? Math.round(
-          (
-            consecutiveCount /
-            messages.length
-          ) * 100
+          consecutiveCount /
+          messages.length *
+          100
         )
       : 0;
 
-  const liveMinuteEntries =
+  const minuteEntries =
     [...minuteMap.entries()]
       .sort(
         (a, b) =>
@@ -1647,8 +996,8 @@ function analyzeLiveChat(messages) {
           new Date(b[0])
       );
 
-  const liveMinuteLabels =
-    liveMinuteEntries.map(
+  const minuteLabels =
+    minuteEntries.map(
       ([key]) => {
         const d =
           new Date(key);
@@ -1663,77 +1012,68 @@ function analyzeLiveChat(messages) {
       }
     );
 
-  const liveMinuteValues =
-    liveMinuteEntries.map(
+  const minuteValues =
+    minuteEntries.map(
       ([, value]) =>
         value
     );
 
-  const liveAverage =
-    liveMinuteValues.length
+  const average =
+    minuteValues.length
       ? Math.round(
-          (
-            liveMinuteValues.reduce(
-              (a, b) => a + b,
-              0
-            ) /
-            liveMinuteValues.length
-          ) * 10
+          minuteValues.reduce(
+            (a, b) => a + b,
+            0
+          ) /
+          minuteValues.length *
+          10
         ) / 10
       : 0;
 
-  const livePeak =
-    liveMinuteValues.length
+  const peak =
+    minuteValues.length
       ? Math.max(
-          ...liveMinuteValues
+          ...minuteValues
         )
       : 0;
 
-  const livePeakIndex =
-    liveMinuteValues.length
-      ? liveMinuteValues.indexOf(
-          livePeak
-        )
+  const peakIndex =
+    minuteValues.length
+      ? minuteValues.indexOf(peak)
       : -1;
 
-  const livePeakTime =
-    livePeakIndex >= 0
-      ? liveMinuteLabels[
-          livePeakIndex
-        ]
+  const peakTime =
+    peakIndex >= 0
+      ? minuteLabels[peakIndex]
       : null;
 
-  const liveSpikes = [];
+  const spikes = [];
 
-  if (
-    liveMinuteValues.length >= 2
+  for (
+    let i = 1;
+    i < minuteValues.length;
+    i++
   ) {
-    for (
-      let i = 1;
-      i < liveMinuteValues.length;
-      i++
+    const before =
+      minuteValues[i - 1];
+
+    const current =
+      minuteValues[i];
+
+    if (
+      current >= 10 &&
+      current >= before * 2
     ) {
-      const before =
-        liveMinuteValues[i - 1];
+      spikes.push({
+        time:
+          minuteLabels[i],
 
-      const current =
-        liveMinuteValues[i];
+        count:
+          current,
 
-      if (
-        current >= 10 &&
-        current >= before * 2
-      ) {
-        liveSpikes.push({
-          time:
-            liveMinuteLabels[i],
-
-          count:
-            current,
-
-          previous:
-            before
-        });
-      }
+        previous:
+          before
+      });
     }
   }
 
@@ -1743,35 +1083,96 @@ function analyzeLiveChat(messages) {
 
     consecutiveCount,
 
-    consecutiveRate:
-      liveConsecutiveRate,
+    consecutiveRate,
 
     users:
-      userRanking,
+      usersRanking,
 
     wordRanking,
 
     minute: {
       labels:
-        liveMinuteLabels,
+        minuteLabels,
 
       values:
-        liveMinuteValues,
+        minuteValues,
 
-      average:
-        liveAverage,
+      average,
 
-      peak:
-        livePeak,
+      peak,
 
-      peakTime:
-        livePeakTime,
+      peakTime,
 
-      peakIndex:
-        livePeakIndex
+      peakIndex
     },
 
-    spikes:
-      liveSpikes
+    spikes
   };
 }
+
+
+/* =========================================================
+   メイン分析API
+========================================================= */
+
+app.get(
+  "/api/analyze",
+  async (req, res) => {
+    try {
+      const query =
+        String(
+          req.query.q || ""
+        ).trim();
+
+      const period =
+        String(
+          req.query.period || "all"
+        );
+
+      if (!query) {
+        return res.status(400).json({
+          error:
+            "チャンネル名を入力してください。"
+        });
+      }
+
+      if (!API_KEY) {
+        return res.status(500).json({
+          error:
+            "YOUTUBE_API_KEY が設定されていません。"
+        });
+      }
+
+      const channelId =
+        await searchChannel(query);
+
+      if (!channelId) {
+        return res.status(404).json({
+          error:
+            "チャンネルが見つかりませんでした。"
+        });
+      }
+
+      const channel =
+        await getChannel(channelId);
+
+      if (!channel) {
+        return res.status(404).json({
+          error:
+            "チャンネル情報を取得できませんでした。"
+        });
+      }
+
+
+      /* =====================================================
+         LIVE分析
+      ===================================================== */
+
+      const live =
+        await getCurrentLive(
+          channelId
+        );
+
+      if (
+        live &&
+        live.active
