@@ -1,17 +1,30 @@
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
+```javascript
+/* ========================================
+   チャット稼ぎチェッカー
+   public/app.js 完成版
+======================================== */
 
 let DATA = null;
+
 let currentPeriod = "今日";
 let currentRank = "comments";
 
 let pieChart = null;
 let minuteChart = null;
-let liveMinuteChart = null;
 
-/* =========================
+
+/* ========================================
    共通
-========================= */
+======================================== */
+
+const $ = (selector) => {
+  return document.querySelector(selector);
+};
+
+const $$ = (selector) => {
+  return [...document.querySelectorAll(selector)];
+};
+
 
 function esc(value) {
   return String(value ?? "").replace(
@@ -26,13 +39,15 @@ function esc(value) {
   );
 }
 
+
 function number(value) {
   return Number(value || 0).toLocaleString("ja-JP");
 }
 
-/* =========================
+
+/* ========================================
    画面切り替え
-========================= */
+======================================== */
 
 function showScreen(screenName) {
   $$(".screen").forEach((screen) => {
@@ -48,15 +63,17 @@ function showScreen(screenName) {
   });
 }
 
+
 $$("[data-screen]").forEach((button) => {
   button.addEventListener("click", () => {
     showScreen(button.dataset.screen);
   });
 });
 
-/* =========================
-   エラー表示
-========================= */
+
+/* ========================================
+   エラー
+======================================== */
 
 function showError(message) {
   const error = $("#error");
@@ -66,17 +83,23 @@ function showError(message) {
   }
 }
 
-/* =========================
-   チャンネルカード
-========================= */
+
+/* ========================================
+   チャンネル情報
+======================================== */
 
 function renderChannel() {
-  if (!DATA?.channel) return;
+  const target = $("#channelCard");
+
+  if (!target || !DATA?.channel) {
+    return;
+  }
 
   const channel = DATA.channel;
 
-  $("#channelCard").innerHTML = `
+  target.innerHTML = `
     <div class="channelInner">
+
       <img
         class="channelThumb"
         src="${esc(channel.thumbnail)}"
@@ -84,26 +107,44 @@ function renderChannel() {
       >
 
       <div class="channelInfo">
-        <h2>${esc(channel.title)}</h2>
+
+        <h2>
+          ${esc(channel.title)}
+        </h2>
 
         <div class="stats">
-          <span>登録者 ${number(channel.subscribers)}</span>
-          <span>総再生 ${number(channel.views)}</span>
-          <span>動画 ${number(channel.videoCount)}</span>
+
+          <span>
+            登録者 ${number(channel.subscribers)}
+          </span>
+
+          <span>
+            総再生 ${number(channel.views)}
+          </span>
+
+          <span>
+            動画 ${number(channel.videoCount)}
+          </span>
+
         </div>
+
       </div>
+
     </div>
   `;
 }
 
-/* =========================
-   LIVE表示
-========================= */
+
+/* ========================================
+   ホームのLIVE表示
+======================================== */
 
 function renderLiveHome() {
   const target = $("#liveHome");
 
-  if (!target) return;
+  if (!target) {
+    return;
+  }
 
   if (!DATA?.live) {
     target.innerHTML = `
@@ -111,6 +152,7 @@ function renderLiveHome() {
         現在LIVE中ではありません。
       </div>
     `;
+
     return;
   }
 
@@ -118,19 +160,35 @@ function renderLiveHome() {
 
   target.innerHTML = `
     <div class="liveBox">
-      <div class="liveBadge">🔴 LIVE中</div>
+
+      <div class="liveBadge">
+        🔴 LIVE中
+      </div>
 
       <img
         src="${esc(live.thumbnail)}"
         alt=""
-        style="width:100%;border-radius:12px;margin:10px 0;"
+        style="
+          width:100%;
+          border-radius:12px;
+          margin:10px 0;
+        "
       >
 
-      <h3>${esc(live.title)}</h3>
+      <h3>
+        ${esc(live.title)}
+      </h3>
 
       <div class="stats">
-        <span>👀 ${number(live.views)}</span>
-        <span>👍 ${number(live.likes)}</span>
+
+        <span>
+          👀 ${number(live.views)}
+        </span>
+
+        <span>
+          👍 ${number(live.likes)}
+        </span>
+
       </div>
 
       <a
@@ -140,101 +198,422 @@ function renderLiveHome() {
       >
         YouTubeで見る →
       </a>
+
     </div>
   `;
 }
 
-/* =========================
-   LIVEチャット分析
-========================= */
 
-function renderLiveChat() {
-  const liveChat = DATA?.liveChat;
+/* ========================================
+   LIVEチャット専用セクション
+======================================== */
 
-  /*
-   * 現在LIVEではない場合
-   */
-  if (!DATA?.live || !liveChat) {
-    renderNormalAnalysis();
+function renderLiveChatSection() {
+  const section = $("#liveChatSection");
+
+  if (!section) {
     return;
   }
 
   /*
-   * LIVEチャットが存在する場合
+   * LIVE中ではない
    */
-  renderLiveChatAnalysis(liveChat);
+  if (!DATA?.live || !DATA?.liveChat) {
+    section.style.display = "none";
+    return;
+  }
+
+  /*
+   * LIVE中
+   */
+  section.style.display = "block";
+
+  const liveChat = DATA.liveChat;
+
+  renderLiveChatStats(liveChat);
+  renderLiveWords(liveChat);
+  renderLiveRankingPreview(liveChat);
+  renderLiveSpikes(liveChat);
+  renderLivePeak(liveChat);
 }
 
-/* =========================
+
+/* ========================================
+   LIVEチャット基本統計
+======================================== */
+
+function renderLiveChatStats(liveChat) {
+  const total =
+    $("#liveChatTotal");
+
+  const consecutive =
+    $("#liveChatConsecutive");
+
+  const rate =
+    $("#liveChatRate");
+
+  if (total) {
+    total.textContent =
+      number(liveChat.total);
+  }
+
+  if (consecutive) {
+    consecutive.textContent =
+      number(
+        liveChat.consecutiveCount
+      );
+  }
+
+  if (rate) {
+    rate.textContent =
+      `${number(
+        liveChat.consecutiveRate
+      )}%`;
+  }
+}
+
+
+/* ========================================
+   よく使われた言葉
+======================================== */
+
+function renderLiveWords(liveChat) {
+  const target =
+    $("#liveWordRanking");
+
+  if (!target) {
+    return;
+  }
+
+  const words =
+    liveChat.wordRanking || [];
+
+  if (!words.length) {
+    target.innerHTML = `
+      <div class="muted">
+        まだ十分なチャットデータがありません。
+      </div>
+    `;
+
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="wordGrid">
+
+      ${words
+        .slice(0, 20)
+        .map(
+          (item, index) => `
+            <div class="wordItem">
+
+              <span class="wordRank">
+                ${index + 1}
+              </span>
+
+              <span class="wordText">
+                ${esc(item.word)}
+              </span>
+
+              <span class="wordCount">
+                ${number(item.count)}回
+              </span>
+
+            </div>
+          `
+        )
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+/* ========================================
+   LIVEチャット ユーザーランキング
+======================================== */
+
+function renderLiveRankingPreview(liveChat) {
+  const target =
+    $("#liveChatRanking");
+
+  if (!target) {
+    return;
+  }
+
+  const users =
+    liveChat.users || [];
+
+  if (!users.length) {
+    target.innerHTML = `
+      <div class="muted">
+        チャットユーザーがありません。
+      </div>
+    `;
+
+    return;
+  }
+
+  const sorted =
+    [...users].sort(
+      (a, b) =>
+        Number(b.count || 0) -
+        Number(a.count || 0)
+    );
+
+  target.innerHTML = `
+    <div class="liveRankingList">
+
+      ${sorted
+        .slice(0, 10)
+        .map(
+          (user, index) => `
+            <div class="rankRow">
+
+              <div class="rankNumber">
+                ${index + 1}
+              </div>
+
+              <div class="rankMain">
+
+                <strong>
+                  ${esc(user.name)}
+                </strong>
+
+                <small>
+                  💬 ${number(user.count)}
+                  チャット
+                  ／
+                  🔥 最大
+                  ${number(user.maxStreak)}
+                  連投
+                </small>
+
+              </div>
+
+            </div>
+          `
+        )
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+/* ========================================
+   LIVEチャット急増
+======================================== */
+
+function renderLiveSpikes(liveChat) {
+  const target =
+    $("#liveChatSpikes");
+
+  if (!target) {
+    return;
+  }
+
+  const spikes =
+    liveChat.spikes || [];
+
+  if (!spikes.length) {
+    target.innerHTML = `
+      <div class="muted">
+        🚨 大きなチャット急増は
+        検出されていません。
+      </div>
+    `;
+
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="spikeList">
+
+      ${spikes
+        .map(
+          (item) => `
+            <div class="spikeItem">
+
+              🚨
+
+              <strong>
+                ${esc(item.time)}
+              </strong>
+
+              <span>
+                ${number(item.previous)}
+                →
+                ${number(item.count)}
+                チャット/分
+              </span>
+
+            </div>
+          `
+        )
+        .join("")}
+
+    </div>
+  `;
+}
+
+
+/* ========================================
+   LIVEチャット ピーク時間
+======================================== */
+
+function renderLivePeak(liveChat) {
+  const target =
+    $("#liveChatPeak");
+
+  if (!target) {
+    return;
+  }
+
+  const minute =
+    liveChat.minute || {};
+
+  if (!minute.peakTime) {
+    target.innerHTML = `
+      <div class="muted">
+        まだピーク時間を計算できません。
+      </div>
+    `;
+
+    return;
+  }
+
+  target.innerHTML = `
+    <div>
+
+      <div class="muted">
+        ⏱️ 最もチャットが盛り上がった時間
+      </div>
+
+      <div
+        style="
+          font-size:1.7rem;
+          font-weight:700;
+          margin-top:8px;
+        "
+      >
+        ${esc(minute.peakTime)}
+      </div>
+
+      <div class="muted">
+        ${number(minute.peak)}
+        チャット/分
+      </div>
+
+    </div>
+  `;
+}
+
+
+/* ========================================
    通常コメント分析
-========================= */
+======================================== */
 
 function renderNormalAnalysis() {
-  const rateText = $("#rateText");
-  const minuteStats = $("#minuteStats");
-  const spikes = $("#spikes");
-  const peak = $("#peak");
+  const analysis =
+    DATA?.analysis || {};
+
+  const minute =
+    DATA?.minute || {};
+
+  const rateText =
+    $("#rateText");
+
+  const minuteStats =
+    $("#minuteStats");
+
+  const spikes =
+    $("#spikes");
+
+  const peak =
+    $("#peak");
+
+
+  /*
+   * 連投率
+   */
 
   if (rateText) {
-    const analysis = DATA?.analysis;
-
     rateText.innerHTML = `
       <div>
         通常コメント：
-        <strong>${number(
-          analysis?.normalCount
-        )}</strong>
+        <strong>
+          ${number(
+            analysis.normalCount
+          )}
+        </strong>
       </div>
 
       <div>
         連投コメント：
-        <strong>${number(
-          analysis?.consecutiveCount
-        )}</strong>
+        <strong>
+          ${number(
+            analysis.consecutiveCount
+          )}
+        </strong>
       </div>
 
       <div>
         連投率：
-        <strong>${number(
-          analysis?.consecutiveRate
-        )}%</strong>
+        <strong>
+          ${number(
+            analysis.consecutiveRate
+          )}%
+        </strong>
       </div>
     `;
   }
+
+
+  /*
+   * コメント数/分
+   */
 
   if (minuteStats) {
-    const minute = DATA?.minute;
-
     minuteStats.innerHTML = `
       <div>
-        平均：
-        <strong>${number(
-          minute?.average
-        )}</strong> コメント/分
+        📈 平均：
+        <strong>
+          ${number(minute.average)}
+        </strong>
+        コメント/分
       </div>
 
       <div>
-        ピーク：
-        <strong>${number(
-          minute?.peak
-        )}</strong> コメント/分
+        🔥 ピーク：
+        <strong>
+          ${number(minute.peak)}
+        </strong>
+        コメント/分
       </div>
     `;
   }
+
+
+  /*
+   * 急増
+   */
 
   if (spikes) {
     spikes.innerHTML = `
       <div class="muted">
-        通常コメントの急増分析
+        通常動画コメントの急増分析
       </div>
     `;
   }
 
-  if (peak) {
-    const minute = DATA?.minute;
 
+  /*
+   * ピーク
+   */
+
+  if (peak) {
     if (
-      minute &&
       minute.peakIndex >= 0 &&
       minute.labels?.length
     ) {
@@ -246,7 +625,9 @@ function renderNormalAnalysis() {
             ]
           )}
         </strong>
+
         に最もコメントが集中
+
         （${number(
           minute.peak
         )} コメント/分）
@@ -258,306 +639,409 @@ function renderNormalAnalysis() {
   }
 }
 
-/* =========================
-   LIVEチャット分析表示
-========================= */
 
-function renderLiveChatAnalysis(liveChat) {
-  const rateText = $("#rateText");
-  const minuteStats = $("#minuteStats");
-  const spikes = $("#spikes");
-  const peak = $("#peak");
-  const userPreview = $("#userPreview");
+/* ========================================
+   LIVE / 通常の統計表示
+======================================== */
 
+function renderMainStats() {
   /*
-   * 連投率
+   * LIVE
    */
-  if (rateText) {
-    rateText.innerHTML = `
-      <div class="liveAnalysisTitle">
-        🔴 LIVEチャット分析
-      </div>
 
-      <div>
-        チャット総数：
-        <strong>${number(
-          liveChat.total
-        )}</strong>
-      </div>
+  if (DATA?.liveChat) {
+    const liveChat =
+      DATA.liveChat;
 
-      <div>
-        🔥 連投チャット：
-        <strong>${number(
-          liveChat.consecutiveCount
-        )}</strong>
-      </div>
+    const rateText =
+      $("#rateText");
 
-      <div>
-        🔥 チャット連投率：
-        <strong class="bigRate">
-          ${number(
-            liveChat.consecutiveRate
-          )}%
-        </strong>
-      </div>
-    `;
-  }
+    const minuteStats =
+      $("#minuteStats");
 
-  /*
-   * 1分あたり
-   */
-  if (minuteStats) {
+    const spikes =
+      $("#spikes");
+
+    const peak =
+      $("#peak");
+
+
+    if (rateText) {
+      rateText.innerHTML = `
+        <div>
+          🔴 LIVEチャット総数：
+          <strong>
+            ${number(liveChat.total)}
+          </strong>
+        </div>
+
+        <div>
+          🔥 連投チャット：
+          <strong>
+            ${number(
+              liveChat.consecutiveCount
+            )}
+          </strong>
+        </div>
+
+        <div>
+          🔥 チャット連投率：
+          <strong>
+            ${number(
+              liveChat.consecutiveRate
+            )}%
+          </strong>
+        </div>
+      `;
+    }
+
+
     const minute =
       liveChat.minute || {};
 
-    minuteStats.innerHTML = `
-      <div>
-        📈 平均：
-        <strong>
-          ${number(
-            minute.average
-          )}
-        </strong>
-        チャット/分
-      </div>
+    if (minuteStats) {
+      minuteStats.innerHTML = `
+        <div>
+          📈 平均：
+          <strong>
+            ${number(minute.average)}
+          </strong>
+          チャット/分
+        </div>
 
-      <div>
-        🔥 ピーク：
-        <strong>
-          ${number(
-            minute.peak
-          )}
-        </strong>
-        チャット/分
-      </div>
-    `;
-  }
-
-  /*
-   * 急増
-   */
-  if (spikes) {
-    const list =
-      liveChat.spikes || [];
-
-    if (!list.length) {
-      spikes.innerHTML = `
-        <div class="muted">
-          🚨 現在、大きなチャット急増は
-          検出されていません。
+        <div>
+          🔥 ピーク：
+          <strong>
+            ${number(minute.peak)}
+          </strong>
+          チャット/分
         </div>
       `;
-    } else {
-      spikes.innerHTML = `
-        <div class="spikeList">
+    }
+
+
+    if (spikes) {
+      const list =
+        liveChat.spikes || [];
+
+      if (!list.length) {
+        spikes.innerHTML = `
+          <div class="muted">
+            🚨 大きなチャット急増は
+            検出されていません。
+          </div>
+        `;
+      } else {
+        spikes.innerHTML = `
           ${list
             .map(
               (item) => `
                 <div class="spikeItem">
+
                   🚨
+
                   <strong>
                     ${esc(item.time)}
                   </strong>
 
                   <span>
-                    ${number(
-                      item.previous
-                    )}
-                    → 
-                    ${number(
-                      item.count
-                    )}
+                    ${number(item.previous)}
+                    →
+                    ${number(item.count)}
                     チャット/分
                   </span>
+
                 </div>
               `
             )
             .join("")}
-        </div>
-      `;
+        `;
+      }
     }
+
+
+    if (peak) {
+      if (minute.peakTime) {
+        peak.innerHTML = `
+          <div>
+            ⏱️ 最もチャットが盛り上がった時間
+          </div>
+
+          <div
+            style="
+              font-size:1.6rem;
+              font-weight:700;
+              margin-top:8px;
+            "
+          >
+            ${esc(minute.peakTime)}
+          </div>
+
+          <div class="muted">
+            ${number(minute.peak)}
+            チャット/分
+          </div>
+        `;
+      } else {
+        peak.textContent =
+          "まだチャットデータがありません。";
+      }
+    }
+
+    return;
   }
 
+
   /*
-   * ピーク時間
+   * 通常動画
    */
-  if (peak) {
-    const minute =
-      liveChat.minute || {};
 
-    if (minute.peakTime) {
-      peak.innerHTML = `
-        <div>
-          ⏱️ 最もチャットが盛り上がった時間
-        </div>
+  renderNormalAnalysis();
+}
 
-        <div
-          style="
-            font-size:1.6rem;
-            font-weight:700;
-            margin-top:8px;
-          "
-        >
-          ${esc(
-            minute.peakTime
-          )}
-        </div>
 
-        <div class="muted">
-          ${number(
-            minute.peak
-          )} チャット/分
-        </div>
-      `;
-    } else {
-      peak.textContent =
-        "まだチャットデータがありません。";
-    }
+/* ========================================
+   ユーザー分析
+======================================== */
+
+function renderUserPreview() {
+  const target =
+    $("#userPreview");
+
+  if (!target) {
+    return;
   }
 
+
   /*
-   * ユーザーランキング
+   * LIVE
    */
-  if (userPreview) {
+
+  if (DATA?.liveChat) {
     const users =
-      liveChat.users || [];
+      DATA.liveChat.users || [];
 
     if (!users.length) {
-      userPreview.innerHTML = `
+      target.innerHTML = `
         <div class="muted">
           チャットユーザーがありません。
         </div>
       `;
-    } else {
-      userPreview.innerHTML = `
-        <div class="liveUserRanking">
-          ${users
-            .slice(0, 10)
-            .map(
-              (user, index) => `
-                <div class="userRow">
-                  <div>
-                    <strong>
-                      ${index + 1}位
-                    </strong>
-                    ${esc(
-                      user.name
-                    )}
-                  </div>
 
-                  <div>
-                    💬
-                    ${number(
-                      user.count
-                    )}
-                  </div>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-      `;
+      return;
     }
+
+    target.innerHTML = `
+      <div class="liveUserRanking">
+
+        ${users
+          .slice(0, 10)
+          .map(
+            (user, index) => `
+              <div class="userRow">
+
+                <div>
+                  <strong>
+                    ${index + 1}位
+                  </strong>
+
+                  ${esc(user.name)}
+                </div>
+
+                <div>
+                  💬
+                  ${number(user.count)}
+                </div>
+
+              </div>
+            `
+          )
+          .join("")}
+
+      </div>
+    `;
+
+    return;
   }
+
+
+  /*
+   * 通常コメント
+   */
+
+  const users =
+    DATA?.analysis?.users || [];
+
+  if (!users.length) {
+    target.innerHTML = `
+      <div class="muted">
+        ユーザーデータがありません。
+      </div>
+    `;
+
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="userRanking">
+
+      ${users
+        .slice(0, 10)
+        .map(
+          (user, index) => `
+            <div class="userRow">
+
+              <div>
+                <strong>
+                  ${index + 1}位
+                </strong>
+
+                ${esc(user.name)}
+              </div>
+
+              <div>
+                💬
+                ${number(user.count)}
+              </div>
+
+            </div>
+          `
+        )
+        .join("")}
+
+    </div>
+  `;
 }
 
-/* =========================
-   グラフ
-========================= */
+
+/* ========================================
+   円グラフ
+======================================== */
 
 function renderPie() {
-  const canvas = $("#pie");
+  const canvas =
+    $("#pie");
 
-  if (!canvas) return;
+  if (!canvas) {
+    return;
+  }
 
   if (pieChart) {
     pieChart.destroy();
     pieChart = null;
   }
 
-  const liveChat = DATA?.liveChat;
 
-  let normalCount;
-  let consecutiveCount;
+  let normalCount = 0;
+  let consecutiveCount = 0;
 
-  if (liveChat) {
+  /*
+   * LIVEチャット
+   */
+
+  if (DATA?.liveChat) {
+    const liveChat =
+      DATA.liveChat;
+
     consecutiveCount =
-      liveChat.consecutiveCount || 0;
-
-    normalCount = Math.max(
-      0,
-      (liveChat.total || 0) -
-        consecutiveCount
-    );
-  } else {
-    consecutiveCount =
-      DATA?.analysis
-        ?.consecutiveCount || 0;
+      Number(
+        liveChat.consecutiveCount || 0
+      );
 
     normalCount =
-      DATA?.analysis
-        ?.normalCount || 0;
+      Math.max(
+        0,
+        Number(
+          liveChat.total || 0
+        ) - consecutiveCount
+      );
   }
 
-  pieChart = new Chart(
-    canvas.getContext("2d"),
-    {
-      type: "doughnut",
+  /*
+   * 通常コメント
+   */
 
-      data: {
-        labels: [
-          liveChat
-            ? "通常チャット"
-            : "通常コメント",
+  else {
+    normalCount =
+      Number(
+        DATA?.analysis?.normalCount || 0
+      );
 
-          liveChat
-            ? "連投チャット"
-            : "連投コメント"
-        ],
+    consecutiveCount =
+      Number(
+        DATA?.analysis?.consecutiveCount || 0
+      );
+  }
 
-        datasets: [
-          {
-            data: [
-              normalCount,
-              consecutiveCount
-            ]
-          }
-        ]
-      },
 
-      options: {
-        responsive: true,
+  pieChart =
+    new Chart(
+      canvas.getContext("2d"),
+      {
+        type: "doughnut",
 
-        plugins: {
-          legend: {
-            position: "bottom"
+        data: {
+          labels: [
+            DATA?.liveChat
+              ? "通常チャット"
+              : "通常コメント",
+
+            DATA?.liveChat
+              ? "連投チャット"
+              : "連投コメント"
+          ],
+
+          datasets: [
+            {
+              data: [
+                normalCount,
+                consecutiveCount
+              ]
+            }
+          ]
+        },
+
+        options: {
+          responsive: true,
+
+          plugins: {
+            legend: {
+              position: "bottom"
+            }
           }
         }
       }
-    }
-  );
+    );
 }
+
+
+/* ========================================
+   1分ごとのグラフ
+======================================== */
 
 function renderMinuteChart() {
   const canvas =
     $("#minuteChart");
 
-  if (!canvas) return;
+  if (!canvas) {
+    return;
+  }
 
   if (minuteChart) {
     minuteChart.destroy();
     minuteChart = null;
   }
 
-  const liveChat =
-    DATA?.liveChat;
 
   const minute =
-    liveChat
-      ? liveChat.minute
+    DATA?.liveChat
+      ? DATA.liveChat.minute
       : DATA?.minute;
 
-  if (!minute) return;
+  if (!minute) {
+    return;
+  }
+
 
   minuteChart =
     new Chart(
@@ -572,7 +1056,7 @@ function renderMinuteChart() {
           datasets: [
             {
               label:
-                liveChat
+                DATA?.liveChat
                   ? "チャット数/分"
                   : "コメント数/分",
 
@@ -604,397 +1088,12 @@ function renderMinuteChart() {
     );
 }
 
-/* =========================
-   ユーザー分析
-========================= */
 
-function renderUserPreview() {
-  const target =
-    $("#userPreview");
+/* ========================================
+   スコア
+======================================== */
 
-  if (!target) return;
-
-  /*
-   * LIVEチャットの場合は
-   * renderLiveChatAnalysisで表示済み
-   */
-  if (DATA?.liveChat) {
-    return;
-  }
-
-  const users =
-    DATA?.analysis?.users || [];
-
-  if (!users.length) {
-    target.innerHTML = `
-      <div class="muted">
-        ユーザーデータがありません。
-      </div>
-    `;
-
-    return;
-  }
-
-  target.innerHTML = `
-    <div class="userRanking">
-      ${users
-        .slice(0, 10)
-        .map(
-          (user, index) => `
-            <div class="userRow">
-              <div>
-                <strong>
-                  ${index + 1}位
-                </strong>
-
-                ${esc(
-                  user.name
-                )}
-              </div>
-
-              <div>
-                💬
-                ${number(
-                  user.count
-                )}
-              </div>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-/* =========================
-   ランキング
-========================= */
-
-function renderRanking() {
-  const target =
-    $("#rankingList");
-
-  if (!target || !DATA) return;
-
-  const search =
-    String(
-      $("#rankSearch")?.value ||
-        ""
-    )
-      .trim()
-      .toLowerCase();
-
-  /*
-   * LIVEチャット
-   */
-  if (DATA.liveChat) {
-    renderLiveRanking(
-      target,
-      search
-    );
-
-    return;
-  }
-
-  /*
-   * 通常コメント
-   */
-  const users =
-    DATA.analysis?.users || [];
-
-  if (currentRank === "users") {
-    renderUserRanking(
-      target,
-      users,
-      search
-    );
-
-    return;
-  }
-
-  if (currentRank === "streak") {
-    renderStreakRanking(
-      target,
-      users,
-      search
-    );
-
-    return;
-  }
-
-  renderCommentRanking(
-    target,
-    search
-  );
-}
-
-/* =========================
-   LIVEランキング
-========================= */
-
-function renderLiveRanking(
-  target,
-  search
-) {
-  const users =
-    DATA.liveChat?.users || [];
-
-  let list =
-    [...users];
-
-  if (currentRank === "streak") {
-    list.sort(
-      (a, b) =>
-        (b.maxStreak || 0) -
-        (a.maxStreak || 0)
-    );
-  } else {
-    list.sort(
-      (a, b) =>
-        (b.count || 0) -
-        (a.count || 0)
-    );
-  }
-
-  if (search) {
-    list = list.filter(
-      (user) =>
-        user.name
-          .toLowerCase()
-          .includes(search)
-    );
-  }
-
-  target.innerHTML = `
-    <div class="rankingHeader">
-      🔴 LIVEチャット
-    </div>
-
-    ${list
-      .slice(0, 100)
-      .map(
-        (user, index) => `
-          <div class="rankRow">
-            <div class="rankNumber">
-              ${index + 1}
-            </div>
-
-            <div class="rankMain">
-              <strong>
-                ${esc(
-                  user.name
-                )}
-              </strong>
-
-              <small>
-                ${
-                  currentRank ===
-                  "streak"
-                    ? `🔥 最大連投 ${number(
-                        user.maxStreak
-                      )}`
-                    : `💬 ${number(
-                        user.count
-                      )} チャット`
-                }
-              </small>
-            </div>
-          </div>
-        `
-      )
-      .join("")}
-  `;
-}
-
-/* =========================
-   通常コメントランキング
-========================= */
-
-function renderUserRanking(
-  target,
-  users,
-  search
-) {
-  let list = [...users];
-
-  if (search) {
-    list = list.filter(
-      (user) =>
-        user.name
-          .toLowerCase()
-          .includes(search)
-    );
-  }
-
-  target.innerHTML =
-    list
-      .slice(0, 100)
-      .map(
-        (user, index) => `
-          <div class="rankRow">
-            <div class="rankNumber">
-              ${index + 1}
-            </div>
-
-            <div class="rankMain">
-              <strong>
-                ${esc(
-                  user.name
-                )}
-              </strong>
-
-              <small>
-                💬 ${number(
-                  user.count
-                )}
-                コメント
-                ／
-                🔥 最大連投
-                ${number(
-                  user.maxStreak
-                )}
-              </small>
-            </div>
-          </div>
-        `
-      )
-      .join("");
-}
-
-function renderStreakRanking(
-  target,
-  users,
-  search
-) {
-  let list =
-    [...users].sort(
-      (a, b) =>
-        (b.maxStreak || 0) -
-        (a.maxStreak || 0)
-    );
-
-  if (search) {
-    list = list.filter(
-      (user) =>
-        user.name
-          .toLowerCase()
-          .includes(search)
-    );
-  }
-
-  target.innerHTML =
-    list
-      .slice(0, 100)
-      .map(
-        (user, index) => `
-          <div class="rankRow">
-            <div class="rankNumber">
-              ${index + 1}
-            </div>
-
-            <div class="rankMain">
-              <strong>
-                ${esc(
-                  user.name
-                )}
-              </strong>
-
-              <small>
-                🔥 最大
-                ${number(
-                  user.maxStreak
-                )}
-                連投
-              </small>
-            </div>
-          </div>
-        `
-      )
-      .join("");
-}
-
-function renderCommentRanking(
-  target,
-  search
-) {
-  const users =
-    DATA.analysis?.users || [];
-
-  /*
-   * 現在のサーバーからは
-   * 個別コメント一覧をランキング用に
-   * 全て返していないので、
-   * ユーザーランキングを表示
-   */
-  let list =
-    [...users];
-
-  if (search) {
-    list = list.filter(
-      (user) =>
-        user.name
-          .toLowerCase()
-          .includes(search)
-    );
-  }
-
-  target.innerHTML =
-    list
-      .slice(0, 100)
-      .map(
-        (user, index) => `
-          <div class="rankRow">
-            <div class="rankNumber">
-              ${index + 1}
-            </div>
-
-            <div class="rankMain">
-              <strong>
-                ${esc(
-                  user.name
-                )}
-              </strong>
-
-              <small>
-                💬 ${number(
-                  user.count
-                )}
-                コメント
-              </small>
-            </div>
-          </div>
-        `
-      )
-      .join("");
-}
-
-/* =========================
-   分析画面全体
-========================= */
-
-function renderAnalysis() {
-  renderChannel();
-  renderLiveHome();
-
-  /*
-   * LIVEならLIVEチャット
-   * 通常動画なら通常コメント
-   */
-  if (DATA?.liveChat) {
-    renderLiveChatAnalysis(
-      DATA.liveChat
-    );
-  } else {
-    renderNormalAnalysis();
-    renderUserPreview();
-  }
-
-  renderPie();
-  renderMinuteChart();
-
-  /*
-   * スコア
-   */
+function renderScore() {
   const score =
     $("#score");
 
@@ -1003,6 +1102,10 @@ function renderAnalysis() {
 
   if (score) {
     if (DATA?.liveChat) {
+      /*
+       * LIVEチャットの連投率と
+       * 通常コメントのスコアを混同しない
+       */
       score.textContent =
         "-- / 100";
     } else {
@@ -1022,163 +1125,169 @@ function renderAnalysis() {
         "分析完了";
     }
   }
-
-  /*
-   * LIVEの場合、
-   * ユーザーランキングも表示
-   */
-  if (DATA?.liveChat) {
-    renderUserPreview();
-  }
 }
 
-/* =========================
-   分析実行
-========================= */
 
-async function analyze() {
-  const input =
-    $("#channelInput");
+/* ========================================
+   分析画面
+======================================== */
 
-  const button =
-    $("#analyzeBtn");
+function renderAnalysis() {
+  renderChannel();
 
-  const q =
+  renderLiveHome();
+
+  renderMainStats();
+
+  renderLiveChatSection();
+
+  renderUserPreview();
+
+  renderPie();
+
+  renderMinuteChart();
+
+  renderScore();
+}
+
+
+/* ========================================
+   ランキング
+======================================== */
+
+function renderRanking() {
+  const target =
+    $("#rankingList");
+
+  if (!target || !DATA) {
+    return;
+  }
+
+
+  const search =
     String(
-      input?.value || ""
-    ).trim();
+      $("#rankSearch")?.value || ""
+    )
+      .trim()
+      .toLowerCase();
 
-  if (!q) {
-    showError(
-      "チャンネル名を入力してください。"
+
+  /*
+   * LIVEチャット
+   */
+
+  if (DATA.liveChat) {
+    renderLiveFullRanking(
+      target,
+      search
     );
 
     return;
   }
 
-  showError("");
 
-  if (button) {
-    button.disabled = true;
-    button.textContent =
-      "分析中...";
+  /*
+   * 通常コメント
+   */
+
+  const users =
+    DATA.analysis?.users || [];
+
+
+  if (currentRank === "streak") {
+    renderStreakRanking(
+      target,
+      users,
+      search
+    );
+
+    return;
   }
 
-  try {
-    const url =
-      `/api/analyze?q=${encodeURIComponent(
-        q
-      )}&period=${encodeURIComponent(
-        currentPeriod
-      )}`;
 
-    const response =
-      await fetch(url);
+  /*
+   * users / comments
+   * 現在のサーバーが返す
+   * ユーザーデータを利用
+   */
 
-    const data =
-      await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        data?.error ||
-          "分析に失敗しました。"
-      );
-    }
-
-    DATA = data;
-
-    renderAnalysis();
-
-    renderRanking();
-
-    showScreen(
-      "analysis"
-    );
-  } catch (error) {
-    console.error(error);
-
-    showError(
-      error.message ||
-        "分析中にエラーが発生しました。"
-    );
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent =
-        "分析する";
-    }
-  }
+  renderUserRanking(
+    target,
+    users,
+    search
+  );
 }
 
-/* =========================
-   分析ボタン
-========================= */
 
-$("#analyzeBtn")?.addEventListener(
-  "click",
-  analyze
-);
+/* ========================================
+   LIVE完全ランキング
+======================================== */
 
-$("#channelInput")?.addEventListener(
-  "keydown",
-  (event) => {
-    if (event.key === "Enter") {
-      analyze();
-    }
-  }
-);
+function renderLiveFullRanking(
+  target,
+  search
+) {
+  const users =
+    DATA.liveChat?.users || [];
 
-/* =========================
-   期間フィルター
-========================= */
+  let list =
+    [...users];
 
-$$(".filter").forEach(
-  (button) => {
-    button.addEventListener(
-      "click",
-      async () => {
-        $$(".filter").forEach(
-          (item) =>
-            item.classList.remove(
-              "active"
-            )
-        );
 
-        button.classList.add(
-          "active"
-        );
+  /*
+   * 連投ランキング
+   */
 
-        currentPeriod =
-          button.textContent.trim();
-
-        if (DATA) {
-          await analyze();
-        }
-      }
+  if (currentRank === "streak") {
+    list.sort(
+      (a, b) =>
+        Number(b.maxStreak || 0) -
+        Number(a.maxStreak || 0)
     );
   }
-);
 
-/* =========================
-   ランキングタブ
-========================= */
 
-$$(".tab").forEach(
-  (button) => {
-    button.addEventListener(
-      "click",
-      () => {
-        $$(".tab").forEach(
-          (item) =>
-            item.classList.remove(
-              "active"
-            )
-        );
+  /*
+   * 通常はチャット数
+   */
 
-        button.classList.add(
-          "active"
-        );
+  else {
+    list.sort(
+      (a, b) =>
+        Number(b.count || 0) -
+        Number(a.count || 0)
+    );
+  }
 
-        currentRank =
-          button.dataset.rank ||
-          "comments";
+
+  /*
+   * 検索
+   */
+
+  if (search) {
+    list =
+      list.filter(
+        (user) =>
+          String(user.name || "")
+            .toLowerCase()
+            .includes(search)
+      );
+  }
+
+
+  /*
+   * 1〜100位
+   */
+
+  target.innerHTML = `
+    <div class="rankingHeader">
+      🔴 LIVEチャットランキング
+    </div>
+
+    ${
+      list.length
+        ? list
+            .slice(0, 100)
+            .map(
+              (user, index) => `
+                
