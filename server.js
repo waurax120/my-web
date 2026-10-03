@@ -1207,3 +1207,13 @@ function analyzeLiveChat(messages) {
       : 0;
 
   const peakI
+
+const peakIndex =
+  minuteValues.length
+    ? minuteValues.indexOf(peak)
+    : -1;
+
+const peakTime =
+  peakIndex >= 0
+    ? minuteLabels[peakIndex]
+    : null;
